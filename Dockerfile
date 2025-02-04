@@ -20,7 +20,8 @@ RUN apt-get install -y \
     libxi6 \
     libxrender1 \
     xz-utils \
-    unzip
+    unzip \
+    p7zip-full
 RUN apt-get -y autoremove \
     && rm -rf /var/lib/apt/lists/*
 
@@ -46,9 +47,9 @@ RUN mkdir -p ${blender_path}/2.83/scripts/addons
 COPY ./addons/add-on-extra-mesh-objects-v0.zip /tmp/
 COPY ./addons/add-on-sapling-tree-gen-v0.3.6.zip /tmp/
 
-# Install the add-ons
-RUN unzip /tmp/add-on-extra-mesh-objects-v0.zip -d ${blender_path}/2.83/scripts/addons/ \
-    && unzip /tmp/add-on-sapling-tree-gen-v0.3.6.zip -d ${blender_path}/2.83/scripts/addons/ \
+# Install the add-ons using 7z (which handles newer ZIP formats)
+RUN 7z x /tmp/add-on-extra-mesh-objects-v0.zip -o${blender_path}/2.83/scripts/addons/ || true \
+    && 7z x /tmp/add-on-sapling-tree-gen-v0.3.6.zip -o${blender_path}/2.83/scripts/addons/ || true \
     && rm /tmp/add-on-extra-mesh-objects-v0.zip \
     && rm /tmp/add-on-sapling-tree-gen-v0.3.6.zip
 
