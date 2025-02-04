@@ -8,8 +8,8 @@ FROM ubuntu:bionic
 # RUN echo "deb http://mirrors.aliyun.com/ubuntu/ bionic-backports main restricted universe multiverse" >> /etc/apt/sources.list
 
 # Config proxy server
-ENV http_proxy=http://proxy.ubisoft.org:3128 https_proxy=http://proxy.ubisoft.org:3128
-ENV no_proxy=10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,localhost,127.0.0.1,.ubisoft.org,.ubisoft.onbe,.ubisoft.com
+# ENV http_proxy=http://proxy.ubisoft.org:3128 https_proxy=http://proxy.ubisoft.org:3128
+# ENV no_proxy=10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,localhost,127.0.0.1,.ubisoft.org,.ubisoft.onbe,.ubisoft.com
 
 # Install dependencies
 RUN apt-get update
