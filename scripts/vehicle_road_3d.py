@@ -2308,58 +2308,44 @@ def create_lateral_mesh(points, name):
     return obj, base_verts
 
 
-def create_road_lateral(road_object):
-    bpy.ops.object.mode_set(mode="OBJECT")
+def create_road_lateral(road_obj):
+    """Cria a lateral da estrada"""
+    # Certifique-se de que estamos no modo objeto
+    if bpy.context.active_object and bpy.context.active_object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    # Deseleciona todos os objetos
     bpy.ops.object.select_all(action="DESELECT")
 
-    road_object.select_set(True)
-    bpy.context.view_layer.objects.active = road_object
+    # Duplica o objeto da estrada
+    road_obj.select_set(True)
+    bpy.context.view_layer.objects.active = road_obj
+    bpy.ops.object.duplicate()
 
+    # Pega o objeto duplicado
+    road_lateral_obj = bpy.context.active_object
+    road_lateral_obj.name = "RoadLateral"
+
+    # Converte para malha
+    bpy.ops.object.convert(target="MESH")
+
+    # Entra no modo de edição
     bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="DESELECT")
 
-    bpy.context.object.active_material_index = 1
-    bpy.ops.object.material_slot_select()
-    bpy.context.object.active_material_index = 2
-    bpy.ops.object.material_slot_select()
-    bpy.context.object.active_material_index = 5
-    bpy.ops.object.material_slot_select()
+    # Seleciona todos os vértices
+    bpy.ops.mesh.select_all(action="SELECT")
 
-    bpy.ops.mesh.region_to_loop()
+    # Armazena os vértices base
+    bm = bmesh.from_edit_mesh(road_lateral_obj.data)
+    road_lateral_base_verts = [v.co.copy() for v in bm.verts]
 
-    mesh = road_object.data
-    bm = bmesh.from_edit_mesh(mesh)
-
+    # Aplica a extrusão
     bpy.ops.mesh.extrude_region_move(
-        TRANSFORM_OT_translate={"value": (0, 0, -1)}
+        TRANSFORM_OT_translate={"value": (0, 0, -2)}
     )
 
-    bpy.ops.transform.resize(value=(1, 1, 0))
-
-    road_lateral_base_verts = []
-
-    for vert in bm.verts:
-        if vert.select:
-            vert.co.z = 0
-            road_lateral_base_verts.append(vert.index)
-
-    bmesh.update_edit_mesh(mesh)
-    bm.free()
-
-    # bpy.ops.mesh.fill()
-
-    bpy.ops.mesh.select_more()
-
-    bpy.ops.mesh.separate(type="SELECTED")
-
+    # Volta para o modo objeto
     bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="DESELECT")
-
-    road_lateral_obj = bpy.data.objects.get("GeoNode_Street.001")
-
-    road_lateral_obj.name = "RoadLateral"
-    road_lateral_obj.data.name = "RoadLateral"
-    road_lateral_obj.data.materials.clear()
 
     return road_lateral_obj, road_lateral_base_verts
 
