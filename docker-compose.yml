@@ -59,7 +59,9 @@ services:
       "-noaudio",                             # Specify no audio
       "--background",                         # Run without GUI
       "--python",                             # Run the given Python script
-      "${folder_scripts}/vehicle_road_3d.py", # Python script to execute
+      "${folder_scripts}/enable_addons.py",   # Enable add-ons first
+      "--python",                             # Run another Python script
+      "${folder_scripts}/vehicle_road_3d.py", # Main Python script to execute
       "--",                                   # Delimiter to indicate to Blender to stop parsing arguments
       "--csv",                                # CSV file argument
       "${folder_input}/front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv" # CSV file path

@@ -19,7 +19,8 @@ RUN apt-get install -y \
     libglu1-mesa \
     libxi6 \
     libxrender1 \
-    xz-utils
+    xz-utils \
+    unzip
 RUN apt-get -y autoremove \
     && rm -rf /var/lib/apt/lists/*
 
@@ -37,6 +38,19 @@ RUN curl -OL $blender_package_url
 RUN tar -xJf /tmp/${blender_package_name}.tar.xz -C /tmp \
     && rm -f /tmp/${blender_package_name}.tar.xz \
     && mv /tmp/${blender_package_name} ${blender_path}
+
+# Create addons directory
+RUN mkdir -p ${blender_path}/2.83/scripts/addons
+
+# Copy and install add-ons
+COPY ./addons/add-on-extra-mesh-objects-v0.zip /tmp/
+COPY ./addons/add-on-sapling-tree-gen-v0.3.6.zip /tmp/
+
+# Install the add-ons
+RUN unzip /tmp/add-on-extra-mesh-objects-v0.zip -d ${blender_path}/2.83/scripts/addons/ \
+    && unzip /tmp/add-on-sapling-tree-gen-v0.3.6.zip -d ${blender_path}/2.83/scripts/addons/ \
+    && rm /tmp/add-on-extra-mesh-objects-v0.zip \
+    && rm /tmp/add-on-sapling-tree-gen-v0.3.6.zip
 
 # Install pip in Blender's Python
 ARG blender_python_path
