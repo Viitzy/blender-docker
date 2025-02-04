@@ -1,5 +1,5 @@
 import bpy
-from mathutils import Vector
+from mathutils import Vector, Matrix
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull
@@ -2500,17 +2500,21 @@ try:
     current_script_path = bpy.context.space_data.text.filepath
     current_script_directory = os.path.dirname(current_script_path)
 except:
-    # Se falhar, usa o diretório do script atual
-    current_script_directory = os.path.dirname(os.path.abspath(__file__))
+    # Se falhar, usa os diretórios definidos no container
+    current_script_directory = os.getenv(
+        "folder_scripts", "/usr/local/blender/2.83/scripts/addons/ubisoft"
+    )
+    input_directory = os.getenv("folder_input", "/tmp/input")
+    output_directory = os.getenv("folder_output", "/tmp/output")
 
 # Caminho para o arquivo CSV
 csv_file_path = os.path.join(
-    current_script_directory,
+    input_directory,
     "front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv",
 )
 
 # Define o caminho para o arquivo exportado
-output_file = os.path.join(current_script_directory, "output.glb")
+output_file = os.path.join(output_directory, "output.glb")
 
 # Ler os dados do CSV
 points, front_points, terrain_colors, road_points = read_csv_data(csv_file_path)
