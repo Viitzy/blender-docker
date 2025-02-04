@@ -2045,7 +2045,7 @@ def clear_scene():
     # Exclui todos os objetos selecionados
     bpy.ops.object.delete(use_global=False)
     # Limpa os dados órfãos (malhas, materiais, etc.) para liberar memória
-    bpy.ops.outliner.orphans_purge(do_recursive=True)
+    bpy.ops.outliner.orphans_purge()
 
 
 def enable_obj_import_addon():
