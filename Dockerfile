@@ -8,8 +8,8 @@ FROM ubuntu:bionic
 # RUN echo "deb http://mirrors.aliyun.com/ubuntu/ bionic-backports main restricted universe multiverse" >> /etc/apt/sources.list
 
 # Config proxy server
-ENV http_proxy=http://proxy.ubisoft.org:3128 https_proxy=http://proxy.ubisoft.org:3128
-ENV no_proxy=10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,localhost,127.0.0.1,.ubisoft.org,.ubisoft.onbe,.ubisoft.com
+# ENV http_proxy=http://proxy.ubisoft.org:3128 https_proxy=http://proxy.ubisoft.org:3128
+# ENV no_proxy=10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,localhost,127.0.0.1,.ubisoft.org,.ubisoft.onbe,.ubisoft.com
 
 # Install dependencies
 RUN apt-get update
@@ -40,16 +40,20 @@ RUN tar -xJf /tmp/${blender_package_name}.tar.xz -C /tmp \
     && rm -f /tmp/${blender_package_name}.tar.xz \
     && mv /tmp/${blender_package_name} ${blender_path}
 
-# Create addons directory
+# Create addons directory and set permissions
 RUN mkdir -p ${blender_path}/2.83/scripts/addons
 
 # Copy and install add-ons
 COPY ./addons/add-on-extra-mesh-objects-v0.zip /tmp/
 COPY ./addons/add-on-sapling-tree-gen-v0.3.6.zip /tmp/
 
-# Install the add-ons using 7z (which handles newer ZIP formats)
-RUN 7z x /tmp/add-on-extra-mesh-objects-v0.zip -o${blender_path}/2.83/scripts/addons/ || true \
-    && 7z x /tmp/add-on-sapling-tree-gen-v0.3.6.zip -o${blender_path}/2.83/scripts/addons/ || true \
+# Install the add-ons
+RUN cd ${blender_path}/2.83/scripts/addons \
+    && 7z x /tmp/add-on-extra-mesh-objects-v0.zip \
+    && mv add-on-extra-mesh-objects-v0/* . \
+    && rmdir add-on-extra-mesh-objects-v0 \
+    && 7z x /tmp/add-on-sapling-tree-gen-v0.3.6.zip \
+    && chmod -R 755 . \
     && rm /tmp/add-on-extra-mesh-objects-v0.zip \
     && rm /tmp/add-on-sapling-tree-gen-v0.3.6.zip
 
