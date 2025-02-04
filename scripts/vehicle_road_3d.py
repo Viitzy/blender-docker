@@ -1264,36 +1264,37 @@ def delaunay_triangulation(points):
     return tri.simplices
 
 
-def create_surface_faces(vertices, faces_indices, colors):
+def create_surface_faces(vertices, faces_indices, terrain_colors):
     # Cria uma nova malha e um novo objeto
-    mesh = bpy.data.meshes.new(name="Terrain")
-    obj = bpy.data.objects.new(name="Terrain", object_data=mesh)
+    mesh = bpy.data.meshes.new(name="TerrainSurface")
+    obj = bpy.data.objects.new(name="TerrainSurface", object_data=mesh)
 
     # Adiciona o objeto ao contexto da cena
     bpy.context.collection.objects.link(obj)
 
-    # Cria a malha a partir dos vértices e faces
-    mesh.from_pydata(vertices, [], faces_indices)
+    # Converte arrays NumPy para listas Python se necessário
+    vertices_list = (
+        vertices.tolist() if isinstance(vertices, np.ndarray) else vertices
+    )
+    faces_list = (
+        faces_indices.tolist()
+        if isinstance(faces_indices, np.ndarray)
+        else faces_indices
+    )
 
-    # Adiciona uma layer de vertex color
-    if not mesh.vertex_colors:
-        mesh.vertex_colors.new()
-
-    color_layer = mesh.vertex_colors.active
-
-    # Pinta os vertices com as cores do terreno
-    for poly in mesh.polygons:
-        for loop_index in poly.loop_indices:
-            loop_vert_index = mesh.loops[loop_index].vertex_index
-            color_layer.data[loop_index].color = hex_to_rgba(
-                colors[loop_vert_index]
-            )
-
+    # Define a geometria da malha
+    mesh.from_pydata(vertices_list, [], faces_list)
     mesh.update()
 
-    print(
-        f"Criado um terreno com {len(vertices)} pontos e {len(faces_indices)} faces."
-    )
+    # Cria um material para cada face
+    materials = create_materials_from_colors(terrain_colors)
+    for mat in materials:
+        obj.data.materials.append(mat)
+
+    # Atribui materiais às faces
+    for i, face in enumerate(obj.data.polygons):
+        face.material_index = i
+
     return obj
 
 
@@ -2902,3 +2903,43 @@ if __name__ == "__main__":
     # Create the base mesh from the projected points
     base_obj = create_base(projected_points)
     print("Created base mesh from projected points.")
+
+
+def hex_to_rgba(hex_color):
+    """Converte uma cor hexadecimal para RGBA"""
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16) / 255.0
+    g = int(hex_color[2:4], 16) / 255.0
+    b = int(hex_color[4:6], 16) / 255.0
+    return (r, g, b, 1.0)
+
+
+def create_materials_from_colors(colors):
+    """Cria materiais a partir de uma lista de cores hexadecimais"""
+    materials = []
+    for hex_color in colors:
+        mat = bpy.data.materials.new(name=f"Color_{hex_color}")
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+
+        # Limpa todos os nós
+        for node in nodes:
+            nodes.remove(node)
+
+        # Adiciona os nós necessários
+        output_node = nodes.new(type="ShaderNodeOutputMaterial")
+        principled_node = nodes.new(type="ShaderNodeBsdfPrincipled")
+
+        # Configura a cor
+        rgba = hex_to_rgba(hex_color)
+        principled_node.inputs["Base Color"].default_value = rgba
+
+        # Conecta os nós
+        links = mat.node_tree.links
+        links.new(
+            principled_node.outputs["BSDF"], output_node.inputs["Surface"]
+        )
+
+        materials.append(mat)
+
+    return materials
