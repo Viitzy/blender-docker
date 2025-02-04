@@ -2495,17 +2495,22 @@ def join_lateral_objects(lateral_obj, road_lateral_obj):
 clear_scene()
 
 # Diretorio principal de arquivos
-current_script_path = bpy.context.space_data.text.filepath
-current_script_directory = os.path.dirname(current_script_path)
+try:
+    # Tenta obter o caminho do script atual quando executado no editor do Blender
+    current_script_path = bpy.context.space_data.text.filepath
+    current_script_directory = os.path.dirname(current_script_path)
+except:
+    # Se falhar, usa o diretório do script atual
+    current_script_directory = os.path.dirname(os.path.abspath(__file__))
 
 # Caminho para o arquivo CSV
-csv_file_path = (
-    current_script_directory
-    + "/Terrains/corrected_colors_roads_elevation_colors_front_19910.csv"
-)  # Substitua pelo caminho real do arquivo CSV
+csv_file_path = os.path.join(
+    current_script_directory,
+    "front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv",
+)
 
 # Define o caminho para o arquivo exportado
-output_file = current_script_directory + "/19910_corrected_color.glb"
+output_file = os.path.join(current_script_directory, "output.glb")
 
 # Ler os dados do CSV
 points, front_points, terrain_colors, road_points = read_csv_data(csv_file_path)
