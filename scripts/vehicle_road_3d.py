@@ -15,8 +15,8 @@ import math
 
 # Ativando os addons necessários
 addons = [
-    "bl_ext.blender_org.sapling_tree_gen",
-    "bl_ext.blender_org.extra_mesh_objects",
+    "add_curve_sapling",  # Nome correto do add-on Sapling Tree Gen
+    "add_mesh_extra_objects",  # Nome correto do add-on Extra Objects
     "io_scene_gltf2",
 ]
 for addon in addons:
