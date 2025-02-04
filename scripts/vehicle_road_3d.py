@@ -2139,84 +2139,94 @@ def create_stripe_material():
     return stripe_mat
 
 
-def get_street_with_curve(blend_file_path, object_name, points, terrain):
-    # Append the object
+def get_street_with_curve(
+    blend_file_path, object_name, road_line_points, lateral_obj
+):
+    """Importa o objeto da rua do arquivo blend e o posiciona na cena"""
+    # Importa o objeto da rua
     with bpy.data.libraries.load(blend_file_path, link=False) as (
         data_from,
         data_to,
     ):
-        if object_name in data_from.objects:
-            data_to.objects.append(object_name)
+        data_to.objects = [
+            name for name in data_from.objects if name == object_name
+        ]
 
-    # Link the object to the current scene
-    curve_object = bpy.data.objects[object_name]
+    # Adiciona o objeto à cena
+    for obj in data_to.objects:
+        if obj is not None:
+            bpy.context.collection.objects.link(obj)
+            road = obj
 
-    curve_object.location = (0, 0, 0)
+            # Adiciona o modificador de curva
+            curve_modifier = road.modifiers.new(name="Curve", type="CURVE")
 
-    bpy.context.collection.objects.link(curve_object)
+            # Cria a curva a partir dos pontos da estrada
+            curve_data = bpy.data.curves.new("RoadCurve", type="CURVE")
+            curve_data.dimensions = "3D"
+            curve_data.resolution_u = 12
+            curve_data.twist_mode = "MINIMUM"
 
-    if curve_object:
-        curve_data = curve_object.data
-        spline = curve_data.splines[0]
+            # Cria o objeto da curva
+            curve_obj = bpy.data.objects.new("RoadCurve", curve_data)
+            bpy.context.collection.objects.link(curve_obj)
 
-        # Check the spline type
-        if spline.type == "POLY" or spline.type == "NURBS":
-            # Remove existing points
-            spline.points.add(len(points) - len(spline.points))
+            # Adiciona os pontos à curva
+            polyline = curve_data.splines.new("POLY")
+            polyline.points.add(len(road_line_points) - 1)
+            for i, coord in enumerate(road_line_points):
+                x, y, z = coord
+                polyline.points[i].co = (x, y, z, 1)
 
-            # Update the points with new coordinates
-            for i, point in enumerate(points):
-                point += (1,)
-                spline.points[i].co = point
+            # Configura o modificador de curva
+            curve_modifier.object = curve_obj
+            curve_modifier.deform_axis = "POS_X"
 
-    bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="DESELECT")
+            # Adiciona o modificador Shrinkwrap
+            shrinkwrap = road.modifiers.new(
+                name="Shrinkwrap", type="SHRINKWRAP"
+            )
+            shrinkwrap.target = lateral_obj
+            shrinkwrap.wrap_method = "PROJECT"
+            shrinkwrap.wrap_mode = "ABOVE_SURFACE"
+            shrinkwrap.use_project_z = True
 
-    curve_object.select_set(True)
-    bpy.context.view_layer.objects.active = curve_object
+            # Reordena os modificadores manualmente copiando suas configurações
+            modifiers_data = []
+            for mod in road.modifiers:
+                mod_data = {"name": mod.name, "type": mod.type, "settings": {}}
+                # Salva todas as propriedades do modificador
+                for prop in mod.bl_rna.properties:
+                    if not prop.is_readonly:
+                        try:
+                            mod_data["settings"][prop.identifier] = getattr(
+                                mod, prop.identifier
+                            )
+                        except:
+                            pass
+                modifiers_data.append(mod_data)
 
-    bpy.ops.object.modifier_add(type="SHRINKWRAP")
-    bpy.ops.object.modifier_move_to_index(modifier="Shrinkwrap", index=0)
-    shrinkwrap = bpy.context.object.modifiers["Shrinkwrap"]
-    shrinkwrap.target = terrain
-    shrinkwrap.offset = 5
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.curve.select_all(action="SELECT")
+            # Remove todos os modificadores
+            for mod in road.modifiers:
+                road.modifiers.remove(mod)
 
-    bpy.ops.transform.resize(value=(0.995, 0.995, 0.995))
-    bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.modifier_apply(modifier="Shrinkwrap")
+            # Recria os modificadores na ordem desejada (Shrinkwrap primeiro)
+            desired_order = ["Shrinkwrap", "Curve"]
+            for mod_name in desired_order:
+                for mod_data in modifiers_data:
+                    if mod_data["name"] == mod_name:
+                        new_mod = road.modifiers.new(
+                            name=mod_data["name"], type=mod_data["type"]
+                        )
+                        for prop_name, value in mod_data["settings"].items():
+                            try:
+                                setattr(new_mod, prop_name, value)
+                            except:
+                                pass
 
-    new_points = []
-    if curve_object:
-        curve_data = curve_object.data
-        spline = curve_data.splines[0]
+            return road, road_line_points
 
-        # Check the spline type
-        if spline.type == "POLY" or spline.type == "NURBS":
-
-            # Update the points with new coordinates
-            for point in spline.points:
-                new_points.append(point.co.to_3d())
-
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.curve.select_all(action="SELECT")
-
-    bpy.ops.transform.resize(value=(1.100, 1.100, 1.100))
-
-    bpy.ops.object.mode_set(mode="OBJECT")
-
-    bpy.ops.object.convert(target="MESH")
-
-    bpy.ops.object.mode_set(mode="EDIT")
-    bpy.ops.mesh.select_all(action="SELECT")
-
-    bpy.ops.mesh.remove_doubles()
-
-    bpy.ops.object.mode_set(mode="OBJECT")
-    bpy.ops.object.select_all(action="DESELECT")
-
-    return curve_object, new_points
+    return None, None
 
 
 def angle_from_center(point, center):
