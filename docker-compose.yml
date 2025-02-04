@@ -16,6 +16,7 @@ services:
         - ./input:${folder_input}
         - ./output:${folder_output}
         - ./scripts:${folder_scripts}
+        - ./Assets:/usr/local/blender/2.83/scripts/addons/ubisoft/Assets
       env_file:
         - ./.env
 

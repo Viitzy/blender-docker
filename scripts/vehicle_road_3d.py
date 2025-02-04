@@ -2548,6 +2548,9 @@ except:
     )
     input_directory = os.getenv("folder_input", "/tmp/input")
     output_directory = os.getenv("folder_output", "/tmp/output")
+    assets_directory = os.getenv(
+        "folder_assets", "/usr/local/blender/2.83/scripts/addons/ubisoft/Assets"
+    )
 
 # Caminho para o arquivo CSV
 csv_file_path = os.path.join(
@@ -2557,6 +2560,9 @@ csv_file_path = os.path.join(
 
 # Define o caminho para o arquivo exportado
 output_file = os.path.join(output_directory, "output.glb")
+
+# Define o caminho para o arquivo blend com os assets
+blend_file_path = os.path.join(assets_directory, "MaskTest.blend")
 
 # Ler os dados do CSV
 points, front_points, terrain_colors, road_points = read_csv_data(csv_file_path)
@@ -2715,7 +2721,6 @@ front_distance = (last_road_point - first_road_point).length
 
 # ============================================
 
-blend_file_path = current_script_directory + "/Assets/MaskTest.blend"
 object_name = "GeoNode_Street"
 
 road, road_line_points = get_street_with_curve(
@@ -2766,14 +2771,13 @@ subdivide_object(terrain_obj, cuts=3)
 # ====================================================================
 
 # Path to the Blender file containing the material
-material_file_path = current_script_directory + "/Assets/MaskTest.blend"
 material_name = "TerrainMask_BW"
 
 # Pega o material com mascara
-mask_material = get_external_material(material_file_path, material_name)
+mask_material = get_external_material(blend_file_path, material_name)
 
 material_name = "TerrainLateralMatDino"
-soil_material = get_external_material(material_file_path, material_name)
+soil_material = get_external_material(blend_file_path, material_name)
 
 # Aplica o material ao objeto criado
 apply_material_to_object(lateral_obj, soil_material)
