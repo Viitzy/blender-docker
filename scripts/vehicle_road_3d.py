@@ -13,6 +13,47 @@ import os
 import bmesh
 import math
 
+
+def hex_to_rgba(hex_color):
+    """Converte uma cor hexadecimal para RGBA"""
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16) / 255.0
+    g = int(hex_color[2:4], 16) / 255.0
+    b = int(hex_color[4:6], 16) / 255.0
+    return (r, g, b, 1.0)
+
+
+def create_materials_from_colors(colors):
+    """Cria materiais a partir de uma lista de cores hexadecimais"""
+    materials = []
+    for hex_color in colors:
+        mat = bpy.data.materials.new(name=f"Color_{hex_color}")
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+
+        # Limpa todos os nós
+        for node in nodes:
+            nodes.remove(node)
+
+        # Adiciona os nós necessários
+        output_node = nodes.new(type="ShaderNodeOutputMaterial")
+        principled_node = nodes.new(type="ShaderNodeBsdfPrincipled")
+
+        # Configura a cor
+        rgba = hex_to_rgba(hex_color)
+        principled_node.inputs["Base Color"].default_value = rgba
+
+        # Conecta os nós
+        links = mat.node_tree.links
+        links.new(
+            principled_node.outputs["BSDF"], output_node.inputs["Surface"]
+        )
+
+        materials.append(mat)
+
+    return materials
+
+
 # Ativando os addons necessários
 addons = [
     "add_curve_sapling",  # Nome correto do add-on Sapling Tree Gen
@@ -2903,43 +2944,3 @@ if __name__ == "__main__":
     # Create the base mesh from the projected points
     base_obj = create_base(projected_points)
     print("Created base mesh from projected points.")
-
-
-def hex_to_rgba(hex_color):
-    """Converte uma cor hexadecimal para RGBA"""
-    hex_color = hex_color.lstrip("#")
-    r = int(hex_color[0:2], 16) / 255.0
-    g = int(hex_color[2:4], 16) / 255.0
-    b = int(hex_color[4:6], 16) / 255.0
-    return (r, g, b, 1.0)
-
-
-def create_materials_from_colors(colors):
-    """Cria materiais a partir de uma lista de cores hexadecimais"""
-    materials = []
-    for hex_color in colors:
-        mat = bpy.data.materials.new(name=f"Color_{hex_color}")
-        mat.use_nodes = True
-        nodes = mat.node_tree.nodes
-
-        # Limpa todos os nós
-        for node in nodes:
-            nodes.remove(node)
-
-        # Adiciona os nós necessários
-        output_node = nodes.new(type="ShaderNodeOutputMaterial")
-        principled_node = nodes.new(type="ShaderNodeBsdfPrincipled")
-
-        # Configura a cor
-        rgba = hex_to_rgba(hex_color)
-        principled_node.inputs["Base Color"].default_value = rgba
-
-        # Conecta os nós
-        links = mat.node_tree.links
-        links.new(
-            principled_node.outputs["BSDF"], output_node.inputs["Surface"]
-        )
-
-        materials.append(mat)
-
-    return materials
