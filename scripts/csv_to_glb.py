@@ -4,6 +4,8 @@ import os
 import sys
 import argparse
 import logging
+import numpy as np
+from scipy.spatial import Delaunay
 
 # Configure logging
 logging.basicConfig(
@@ -13,59 +15,45 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def create_point_cloud_from_csv(csv_path):
-    """Create a point cloud mesh from CSV data."""
+def create_terrain_from_csv(csv_path):
+    """Create a terrain mesh from CSV data."""
     # Create a new mesh and object
-    mesh = bpy.data.meshes.new("point_cloud")
-    obj = bpy.data.objects.new("PointCloud", mesh)
+    mesh = bpy.data.meshes.new("terrain")
+    obj = bpy.data.objects.new("Terrain", mesh)
 
     # Link object to scene
     bpy.context.scene.collection.objects.link(obj)
 
     # Read CSV data
-    vertices = []
+    points = []
     colors = []
 
     with open(csv_path, "r") as file:
         reader = csv.DictReader(file)
         for row in reader:
-            # Get vertex coordinates
+            # Get coordinates
             x = float(row["x"])
             y = float(row["y"])
             z = float(row["z"])
-            vertices.append((x, y, z))
+            points.append([x, y, z])
 
-            # Get vertex colors
+            # Get colors
             r = float(row["r"]) / 255.0
             g = float(row["g"]) / 255.0
             b = float(row["b"]) / 255.0
             colors.append((r, g, b, 1.0))
 
-    # Create small faces for each point to make them visible
-    faces = []
-    point_size = 0.1  # Size of the square for each point
+    points = np.array(points)
 
-    new_vertices = []
-    new_faces = []
-    vertex_colors = []
+    # Create triangulation in 2D (using x,y coordinates)
+    tri = Delaunay(points[:, :2])
 
-    for i, (x, y, z) in enumerate(vertices):
-        # Create a small square for each point
-        idx = i * 4
-        new_vertices.extend(
-            [
-                (x - point_size, y - point_size, z),
-                (x + point_size, y - point_size, z),
-                (x + point_size, y + point_size, z),
-                (x - point_size, y + point_size, z),
-            ]
-        )
-        new_faces.append((idx, idx + 1, idx + 2, idx + 3))
-        # Repeat the color for each vertex of the square
-        vertex_colors.extend([colors[i]] * 4)
+    # Create vertices and faces for the mesh
+    vertices = points.tolist()
+    faces = tri.simplices.tolist()
 
-    # Create mesh from vertices and faces
-    mesh.from_pydata(new_vertices, [], new_faces)
+    # Create the mesh
+    mesh.from_pydata(vertices, [], faces)
     mesh.update()
 
     # Add vertex colors
@@ -73,14 +61,18 @@ def create_point_cloud_from_csv(csv_path):
         mesh.vertex_colors.new()
 
     color_layer = mesh.vertex_colors.active
-    for i, color in enumerate(vertex_colors):
-        color_layer.data[i].color = color
 
-    # Set object display properties for better visualization
-    obj.display_type = "SOLID"
+    # Apply colors to faces
+    for poly in mesh.polygons:
+        for idx, vert_idx in enumerate(poly.vertices):
+            color_layer.data[poly.loop_indices[idx]].color = colors[vert_idx]
 
-    # Add material for vertex colors
-    mat = bpy.data.materials.new(name="PointCloudMaterial")
+    # Smooth shading
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+
+    # Add material
+    mat = bpy.data.materials.new(name="TerrainMaterial")
     mat.use_nodes = True
     mat.use_backface_culling = True
 
@@ -99,6 +91,10 @@ def create_point_cloud_from_csv(csv_path):
     # Link nodes
     links.new(vertex_color.outputs["Color"], bsdf.inputs["Base Color"])
     links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+
+    # Set material properties
+    bsdf.inputs["Roughness"].default_value = 0.8
+    bsdf.inputs["Specular"].default_value = 0.1
 
     # Assign material to object
     if obj.data.materials:
@@ -126,7 +122,7 @@ if __name__ == "__main__":
     argv = argv[argv.index("--") + 1 :]
 
     parser = argparse.ArgumentParser(
-        description="Convert CSV point cloud data to GLB."
+        description="Convert CSV terrain data to GLB."
     )
     parser.add_argument("--input", required=True, help="Input CSV file path")
     parser.add_argument("--output", required=True, help="Output GLB file path")
@@ -136,9 +132,9 @@ if __name__ == "__main__":
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
 
-    # Create point cloud from CSV
-    log.info(f"Creating point cloud from {args.input}")
-    point_cloud = create_point_cloud_from_csv(args.input)
+    # Create terrain from CSV
+    log.info(f"Creating terrain from {args.input}")
+    terrain = create_terrain_from_csv(args.input)
 
     # Export to GLB
     log.info(f"Exporting to {args.output}")
