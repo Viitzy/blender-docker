@@ -15,8 +15,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def create_terrain_from_csv(csv_path, depth=20.0):
-    """Create a volumetric terrain mesh from CSV data with consistent depth."""
+def create_terrain_from_csv(csv_path, depth=None):
+    """Create a volumetric terrain mesh from CSV data with depth based on elevation range."""
     # Create a new mesh and object
     mesh = bpy.data.meshes.new("terrain")
     obj = bpy.data.objects.new("Terrain", mesh)
@@ -45,11 +45,17 @@ def create_terrain_from_csv(csv_path, depth=20.0):
 
     points = np.array(points)
 
-    # Find the minimum z value to calculate relative heights
+    # Find the minimum and maximum z values
     min_z = np.min(points[:, 2])
     max_z = np.max(points[:, 2])
     elevation_range = max_z - min_z
-    log.info(f"Terrain elevation range: {elevation_range} units")
+
+    # If depth is not provided, use the elevation range
+    if depth is None:
+        depth = elevation_range
+
+    log.info(f"Terrain elevation range: {elevation_range:.2f} units")
+    log.info(f"Using depth: {depth:.2f} units")
 
     # Create triangulation in 2D (using x,y coordinates)
     tri = Delaunay(points[:, :2])
@@ -57,14 +63,12 @@ def create_terrain_from_csv(csv_path, depth=20.0):
     # Create vertices for top and bottom surfaces
     vertices_top = points.tolist()
 
-    # Calculate bottom vertices with consistent depth from each point
+    # Calculate bottom vertices with depth equal to elevation range
     vertices_bottom = []
     for point in points:
-        # Calculate the depth for this point
-        # The depth will be constant (20.0) plus the elevation difference from the lowest point
-        point_elevation = point[2] - min_z
-        total_depth = depth + point_elevation
-        vertices_bottom.append([point[0], point[1], point[2] - total_depth])
+        # The bottom surface will be at the lowest elevation minus the elevation range
+        bottom_z = min_z - depth
+        vertices_bottom.append([point[0], point[1], bottom_z])
 
     vertices = vertices_top + vertices_bottom
 
@@ -197,7 +201,9 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Input CSV file path")
     parser.add_argument("--output", required=True, help="Output GLB file path")
     parser.add_argument(
-        "--depth", type=float, default=20.0, help="Base terrain depth/thickness"
+        "--depth",
+        type=float,
+        help="Optional override for terrain depth/thickness. If not provided, uses elevation range.",
     )
     args = parser.parse_args(argv)
 
