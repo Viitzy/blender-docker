@@ -15,8 +15,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def create_terrain_from_csv(csv_path):
-    """Create a terrain mesh from CSV data."""
+def create_terrain_from_csv(csv_path, depth=50.0):
+    """Create a volumetric terrain mesh from CSV data."""
     # Create a new mesh and object
     mesh = bpy.data.meshes.new("terrain")
     obj = bpy.data.objects.new("Terrain", mesh)
@@ -48,9 +48,39 @@ def create_terrain_from_csv(csv_path):
     # Create triangulation in 2D (using x,y coordinates)
     tri = Delaunay(points[:, :2])
 
-    # Create vertices and faces for the mesh
-    vertices = points.tolist()
-    faces = tri.simplices.tolist()
+    # Create vertices for top and bottom surfaces
+    vertices_top = points.tolist()
+    vertices_bottom = [
+        [p[0], p[1], p[2] - depth] for p in points
+    ]  # Bottom vertices
+    vertices = vertices_top + vertices_bottom
+
+    # Create faces for top and bottom surfaces
+    faces_top = tri.simplices.tolist()
+    faces_bottom = [[i + len(points) for i in face] for face in faces_top]
+    # Reverse bottom face orientation
+    faces_bottom = [face[::-1] for face in faces_bottom]
+
+    # Create side walls by connecting top and bottom vertices
+    # First, find boundary edges
+    edges = set()
+    for face in faces_top:
+        for i in range(3):
+            edge = tuple(sorted([face[i], face[(i + 1) % 3]]))
+            if edge in edges:
+                edges.remove(edge)
+            else:
+                edges.add(edge)
+
+    # Create side wall faces
+    side_faces = []
+    for edge in edges:
+        v1, v2 = edge
+        # Create quad face: [top1, top2, bottom2, bottom1]
+        side_faces.append([v1, v2, v2 + len(points), v1 + len(points)])
+
+    # Combine all faces
+    faces = faces_top + faces_bottom + side_faces
 
     # Create the mesh
     mesh.from_pydata(vertices, [], faces)
@@ -62,10 +92,37 @@ def create_terrain_from_csv(csv_path):
 
     color_layer = mesh.vertex_colors.active
 
+    # Function to get darker color for bottom and sides
+    def darken_color(color, factor=0.5):
+        return (
+            color[0] * factor,
+            color[1] * factor,
+            color[2] * factor,
+            color[3],
+        )
+
     # Apply colors to faces
     for poly in mesh.polygons:
-        for idx, vert_idx in enumerate(poly.vertices):
-            color_layer.data[poly.loop_indices[idx]].color = colors[vert_idx]
+        is_bottom = all(
+            v >= len(points) for v in poly.vertices
+        )  # Check if it's a bottom face
+        is_side = (
+            any(v >= len(points) for v in poly.vertices) and not is_bottom
+        )  # Check if it's a side face
+
+        for idx, loop_idx in enumerate(poly.loop_indices):
+            vert_idx = poly.vertices[idx]
+            original_color_idx = (
+                vert_idx if vert_idx < len(points) else vert_idx - len(points)
+            )
+            color = colors[original_color_idx]
+
+            if is_bottom:
+                color = darken_color(color, 0.3)  # Darker for bottom
+            elif is_side:
+                color = darken_color(color, 0.7)  # Slightly darker for sides
+
+            color_layer.data[loop_idx].color = color
 
     # Smooth shading
     for poly in mesh.polygons:
@@ -74,7 +131,7 @@ def create_terrain_from_csv(csv_path):
     # Add material
     mat = bpy.data.materials.new(name="TerrainMaterial")
     mat.use_nodes = True
-    mat.use_backface_culling = True
+    mat.use_backface_culling = False  # Show back faces
 
     # Set up material to use vertex colors
     nodes = mat.node_tree.nodes
@@ -126,6 +183,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--input", required=True, help="Input CSV file path")
     parser.add_argument("--output", required=True, help="Output GLB file path")
+    parser.add_argument(
+        "--depth", type=float, default=50.0, help="Terrain depth/thickness"
+    )
     args = parser.parse_args(argv)
 
     # Clear existing mesh objects
@@ -134,7 +194,7 @@ if __name__ == "__main__":
 
     # Create terrain from CSV
     log.info(f"Creating terrain from {args.input}")
-    terrain = create_terrain_from_csv(args.input)
+    terrain = create_terrain_from_csv(args.input, args.depth)
 
     # Export to GLB
     log.info(f"Exporting to {args.output}")

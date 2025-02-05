@@ -64,5 +64,7 @@ services:
       "--input",                              # Input CSV file path
       "${folder_input}/front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv",
       "--output",                             # Output GLB file path
-      "${folder_output}/point_cloud.glb"      # Output GLB file
+      "${folder_output}/point_cloud.glb",     # Output GLB file
+      "--depth",                              # Terrain depth/thickness
+      "20.0"                                  # Depth value in meters
       ]
