@@ -46,7 +46,7 @@ services:
       "-noaudio",                             # Specify no audio
       "--background",                         # Run without GUI
       "--python",                             # Run the given Python script
-      "main.py",                              # Python script to execute
+      "${folder_scripts}/main.py",            # Python script to execute with full path
       "--",                                   # Delimiter to indicate to Blender to stop parsing arguments
       "--argument1",                          # Custom argument
       "Some dummy argument value"             # Custom argument value
