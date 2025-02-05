@@ -10,7 +10,7 @@ if not path in sys.path:
     sys.path.append(path)
 
 # Import custom modules
-from . import utils
+import utils
 
 # Load default logging configuration
 logging.basicConfig(
