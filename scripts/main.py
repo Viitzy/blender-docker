@@ -5,7 +5,7 @@ import os
 import sys
 
 # Add current file path to Python path
-path = os.path.dirname(os.path.abspath(__file__))
+path = os.path.dirname(bpy.data.filepath)
 if not path in sys.path:
     sys.path.append(path)
 

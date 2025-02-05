@@ -15,8 +15,7 @@ services:
       volumes:
         - ./input:${folder_input}
         - ./output:${folder_output}
-        - ./scripts:/usr/local/blender/2.83/scripts/addons/ubisoft
-        - ./Assets:/usr/local/blender/2.83/scripts/addons/ubisoft/Assets
+        - ./scripts:${folder_scripts}
       env_file:
         - ./.env
 
@@ -46,7 +45,7 @@ services:
       "-noaudio",                             # Specify no audio
       "--background",                         # Run without GUI
       "--python",                             # Run the given Python script
-      "/usr/local/blender/2.83/scripts/addons/ubisoft/main.py",  # Python script to execute with full path
+      "main.py",                              # Python script to execute
       "--",                                   # Delimiter to indicate to Blender to stop parsing arguments
       "--argument1",                          # Custom argument
       "Some dummy argument value"             # Custom argument value
