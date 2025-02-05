@@ -5,12 +5,12 @@ import os
 import sys
 
 # Add current file path to Python path
-path = os.path.dirname(bpy.data.filepath)
+path = os.path.dirname(os.path.abspath(__file__))
 if not path in sys.path:
     sys.path.append(path)
 
 # Import custom modules
-import utils
+from . import utils
 
 # Load default logging configuration
 logging.basicConfig(
