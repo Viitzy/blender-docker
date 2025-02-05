@@ -15,8 +15,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def create_terrain_from_csv(csv_path, depth=None):
-    """Create a volumetric terrain mesh from CSV data with depth based on elevation range."""
+def create_terrain_from_csv(csv_path):
+    """Create a volumetric terrain mesh from CSV data with normalized heights."""
     # Create a new mesh and object
     mesh = bpy.data.meshes.new("terrain")
     obj = bpy.data.objects.new("Terrain", mesh)
@@ -50,12 +50,12 @@ def create_terrain_from_csv(csv_path, depth=None):
     max_z = np.max(points[:, 2])
     elevation_range = max_z - min_z
 
-    # If depth is not provided, use the elevation range
-    if depth is None:
-        depth = elevation_range
+    log.info(f"Original elevation range: {elevation_range:.2f} units")
+    log.info(f"Original min height: {min_z:.2f}")
+    log.info(f"Original max height: {max_z:.2f}")
 
-    log.info(f"Terrain elevation range: {elevation_range:.2f} units")
-    log.info(f"Using depth: {depth:.2f} units")
+    # Normalize heights to start from 0
+    points[:, 2] = points[:, 2] - min_z
 
     # Create triangulation in 2D (using x,y coordinates)
     tri = Delaunay(points[:, :2])
@@ -63,12 +63,8 @@ def create_terrain_from_csv(csv_path, depth=None):
     # Create vertices for top and bottom surfaces
     vertices_top = points.tolist()
 
-    # Calculate bottom vertices with depth equal to elevation range
-    vertices_bottom = []
-    for point in points:
-        # The bottom surface will be at the lowest elevation minus the elevation range
-        bottom_z = min_z - depth
-        vertices_bottom.append([point[0], point[1], bottom_z])
+    # Create bottom vertices (all at z=0)
+    vertices_bottom = [[p[0], p[1], 0.0] for p in points]
 
     vertices = vertices_top + vertices_bottom
 
@@ -200,11 +196,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--input", required=True, help="Input CSV file path")
     parser.add_argument("--output", required=True, help="Output GLB file path")
-    parser.add_argument(
-        "--depth",
-        type=float,
-        help="Optional override for terrain depth/thickness. If not provided, uses elevation range.",
-    )
     args = parser.parse_args(argv)
 
     # Clear existing mesh objects
@@ -213,7 +204,7 @@ if __name__ == "__main__":
 
     # Create terrain from CSV
     log.info(f"Creating terrain from {args.input}")
-    terrain = create_terrain_from_csv(args.input, args.depth)
+    terrain = create_terrain_from_csv(args.input)
 
     # Export to GLB
     log.info(f"Exporting to {args.output}")
