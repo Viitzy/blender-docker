@@ -4,9 +4,9 @@ import logging
 import os
 import sys
 
-# Add the directory containing this script to the Python path
-path = os.path.dirname(os.path.realpath(__file__))
-if path not in sys.path:
+# Add current file path to Python path
+path = os.path.dirname(bpy.data.filepath)
+if not path in sys.path:
     sys.path.append(path)
 
 # Import custom modules
