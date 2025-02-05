@@ -50,3 +50,19 @@ services:
       "--argument1",                          # Custom argument
       "Some dummy argument value"             # Custom argument value
       ]
+
+  csv-to-glb:
+    container_name: blender-csv-to-glb
+    <<: *image
+    command: [
+      "${blender_path}/blender",              # Blender path
+      "-noaudio",                             # Specify no audio
+      "--background",                         # Run without GUI
+      "--python",                             # Run the given Python script
+      "${folder_scripts}/csv_to_glb.py",      # Python script to execute
+      "--",                                   # Delimiter to indicate to Blender to stop parsing arguments
+      "--input",                              # Input CSV file path
+      "${folder_input}/front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv",
+      "--output",                             # Output GLB file path
+      "${folder_output}/point_cloud.glb"      # Output GLB file
+      ]
