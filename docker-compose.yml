@@ -62,9 +62,9 @@ services:
       "${folder_scripts}/csv_to_glb.py",      # Python script to execute
       "--",                                   # Delimiter to indicate to Blender to stop parsing arguments
       "--input",                              # Input CSV file path
-      "${folder_input}/front_cardinal_utm_elevation_colors_test_-20.16577547484259_-43.95320188043381.csv",
+      "${folder_input}/steep_uphill.csv",     # Input CSV file
       "--output",                             # Output GLB file path
-      "${folder_output}/point_cloud.glb",     # Output GLB file
+      "${folder_output}/steep_uphill.glb",    # Output GLB file
       "--depth",                              # Terrain depth/thickness
-      "20.0"                                  # Depth value in meters
+      "5.0"                                   # Depth value in meters
       ]
