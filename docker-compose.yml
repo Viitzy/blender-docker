@@ -66,5 +66,5 @@ services:
       "--output",                             # Output GLB file path
       "${folder_output}/steep_uphill.glb",    # Output GLB file
       "--depth",                              # Terrain depth/thickness
-      "5.0"                                   # Depth value in meters
+      "20.0"                                  # Base depth value in meters
       ]

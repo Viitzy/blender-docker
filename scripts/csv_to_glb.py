@@ -15,8 +15,8 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def create_terrain_from_csv(csv_path, depth=50.0):
-    """Create a volumetric terrain mesh from CSV data."""
+def create_terrain_from_csv(csv_path, depth=20.0):
+    """Create a volumetric terrain mesh from CSV data with consistent depth."""
     # Create a new mesh and object
     mesh = bpy.data.meshes.new("terrain")
     obj = bpy.data.objects.new("Terrain", mesh)
@@ -45,14 +45,27 @@ def create_terrain_from_csv(csv_path, depth=50.0):
 
     points = np.array(points)
 
+    # Find the minimum z value to calculate relative heights
+    min_z = np.min(points[:, 2])
+    max_z = np.max(points[:, 2])
+    elevation_range = max_z - min_z
+    log.info(f"Terrain elevation range: {elevation_range} units")
+
     # Create triangulation in 2D (using x,y coordinates)
     tri = Delaunay(points[:, :2])
 
     # Create vertices for top and bottom surfaces
     vertices_top = points.tolist()
-    vertices_bottom = [
-        [p[0], p[1], p[2] - depth] for p in points
-    ]  # Bottom vertices
+
+    # Calculate bottom vertices with consistent depth from each point
+    vertices_bottom = []
+    for point in points:
+        # Calculate the depth for this point
+        # The depth will be constant (20.0) plus the elevation difference from the lowest point
+        point_elevation = point[2] - min_z
+        total_depth = depth + point_elevation
+        vertices_bottom.append([point[0], point[1], point[2] - total_depth])
+
     vertices = vertices_top + vertices_bottom
 
     # Create faces for top and bottom surfaces
@@ -184,7 +197,7 @@ if __name__ == "__main__":
     parser.add_argument("--input", required=True, help="Input CSV file path")
     parser.add_argument("--output", required=True, help="Output GLB file path")
     parser.add_argument(
-        "--depth", type=float, default=50.0, help="Terrain depth/thickness"
+        "--depth", type=float, default=20.0, help="Base terrain depth/thickness"
     )
     args = parser.parse_args(argv)
 
