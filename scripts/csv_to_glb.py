@@ -41,17 +41,70 @@ def create_point_cloud_from_csv(csv_path):
             b = float(row["b"]) / 255.0
             colors.append((r, g, b, 1.0))
 
-    # Create mesh from vertices
-    mesh.from_pydata(vertices, [], [])
+    # Create small faces for each point to make them visible
+    faces = []
+    point_size = 0.1  # Size of the square for each point
+
+    new_vertices = []
+    new_faces = []
+    vertex_colors = []
+
+    for i, (x, y, z) in enumerate(vertices):
+        # Create a small square for each point
+        idx = i * 4
+        new_vertices.extend(
+            [
+                (x - point_size, y - point_size, z),
+                (x + point_size, y - point_size, z),
+                (x + point_size, y + point_size, z),
+                (x - point_size, y + point_size, z),
+            ]
+        )
+        new_faces.append((idx, idx + 1, idx + 2, idx + 3))
+        # Repeat the color for each vertex of the square
+        vertex_colors.extend([colors[i]] * 4)
+
+    # Create mesh from vertices and faces
+    mesh.from_pydata(new_vertices, [], new_faces)
     mesh.update()
 
     # Add vertex colors
     if not mesh.vertex_colors:
         mesh.vertex_colors.new()
 
-    color_layer = mesh.vertex_colors[0]
-    for i, color in enumerate(colors):
+    color_layer = mesh.vertex_colors.active
+    for i, color in enumerate(vertex_colors):
         color_layer.data[i].color = color
+
+    # Set object display properties for better visualization
+    obj.display_type = "SOLID"
+
+    # Add material for vertex colors
+    mat = bpy.data.materials.new(name="PointCloudMaterial")
+    mat.use_nodes = True
+    mat.use_backface_culling = True
+
+    # Set up material to use vertex colors
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    # Clear default nodes
+    nodes.clear()
+
+    # Create nodes
+    vertex_color = nodes.new("ShaderNodeVertexColor")
+    bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+    output = nodes.new("ShaderNodeOutputMaterial")
+
+    # Link nodes
+    links.new(vertex_color.outputs["Color"], bsdf.inputs["Base Color"])
+    links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+
+    # Assign material to object
+    if obj.data.materials:
+        obj.data.materials[0] = mat
+    else:
+        obj.data.materials.append(mat)
 
     return obj
 
@@ -59,7 +112,11 @@ def create_point_cloud_from_csv(csv_path):
 def export_to_glb(output_path):
     """Export the scene to GLB format."""
     bpy.ops.export_scene.gltf(
-        filepath=output_path, export_format="GLB", use_selection=False
+        filepath=output_path,
+        export_format="GLB",
+        use_selection=False,
+        export_materials=True,
+        export_colors=True,
     )
 
 
