@@ -45,7 +45,7 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install dependencies in Blender's Python (for rendering)
-RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir numpy==1.19.5 pandas==1.3.4
+RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir numpy==1.19.5 pandas==1.1.5
 
 # Copy application code
 COPY . .
