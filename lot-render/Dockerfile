@@ -11,6 +11,12 @@ RUN apt-get update && apt-get install -y \
     unzip \
     p7zip-full \
     python3-pip \
+    python3-dev \
+    build-essential \
+    libpq-dev \
+    gcc \
+    libc-dev \
+    libffi-dev \
     && apt-get -y autoremove \
     && rm -rf /var/lib/apt/lists/*
 
