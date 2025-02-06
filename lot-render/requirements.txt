@@ -15,7 +15,7 @@ geopy==2.2.0
 shapely==1.7.1
 pg8000==1.16.6
 google-cloud==0.34.0
-cloud-sql-python-connector==0.9.3
+cloud-sql-python-connector==0.5.2
 openai==0.27.8
 beautifulsoup4==4.9.3
 redis==4.3.6
