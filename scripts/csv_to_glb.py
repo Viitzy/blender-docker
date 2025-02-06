@@ -24,7 +24,7 @@ def create_terrain_from_csv(csv_path):
     # Link object to scene
     bpy.context.scene.collection.objects.link(obj)
 
-    # Read CSV data
+    # Read CSV data.
     points = []
     colors = []
 

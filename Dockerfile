@@ -64,3 +64,15 @@ WORKDIR ${folder_scripts}
 COPY ./requirements.txt .
 RUN ${blender_python_path}/pip3 install --upgrade pip \
     && ${blender_python_path}/pip3 install -r ./requirements.txt
+
+# Copy application code
+COPY . .
+
+# Set environment variable for Blender path
+ENV BLENDER_PATH=${blender_path}/blender
+
+# Expose the FastAPI port
+EXPOSE 8000
+
+# Set the entry point to run the FastAPI server
+CMD ["python3", "scripts/api_server.py"]

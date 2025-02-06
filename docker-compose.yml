@@ -66,3 +66,20 @@ services:
       "--output",                             # Output GLB file path
       "${folder_output}/output.glb"           # Output GLB file
       ]
+
+  blender-api:
+    build:
+      context: .
+      args:
+        blender_package_name: blender-2.83.0-linux64
+        blender_package_url: https://download.blender.org/release/Blender2.83/blender-2.83.0-linux64.tar.xz
+        blender_path: /usr/local/blender
+        blender_python_path: /usr/local/blender/2.83/python/bin
+        folder_scripts: /app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./scripts:/app/scripts
+      - ./input:/app/input
+    environment:
+      - PORT=8000
