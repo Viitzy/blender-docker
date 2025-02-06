@@ -1,5 +1,9 @@
 FROM ubuntu:bionic
 
+# Add deadsnakes PPA for Python 3.9
+RUN apt-get update && apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa
+
 # Install dependencies
 RUN apt-get update && apt-get install -y \
     curl \
@@ -10,8 +14,9 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     unzip \
     p7zip-full \
-    python3-pip \
-    python3-dev \
+    python3.9 \
+    python3.9-dev \
+    python3.9-distutils \
     build-essential \
     libpq-dev \
     gcc \
@@ -19,6 +24,9 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     && apt-get -y autoremove \
     && rm -rf /var/lib/apt/lists/*
+
+# Install pip for Python 3.9
+RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.9
 
 # Set Blender variables
 ENV BLENDER_VERSION="2.83.0"
@@ -48,7 +56,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install dependencies in system Python (for FastAPI)
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN python3.9 -m pip install --no-cache-dir -r requirements.txt
 
 # Install dependencies in Blender's Python (for rendering)
 RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir numpy==1.19.5 pandas==1.1.5
@@ -63,6 +71,6 @@ ENV BLENDER_PATH=${BLENDER_PATH}/blender
 EXPOSE 80
 
 # Set the entry point to run the FastAPI server
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
+CMD ["python3.9", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
 
 
