@@ -1,8 +1,7 @@
-FROM ubuntu:bionic
+FROM ubuntu:focal
 
-# Add deadsnakes PPA for Python 3.9
-RUN apt-get update && apt-get install -y software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
@@ -14,6 +13,10 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     unzip \
     p7zip-full \
+    software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y \
     python3.9 \
     python3.9-dev \
     python3.9-distutils \
