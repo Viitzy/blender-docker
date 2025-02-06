@@ -40,9 +40,12 @@ WORKDIR /app
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt
-RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --upgrade pip \
-    && ${BLENDER_PATH}/2.83/python/bin/pip3 install numpy pandas
+
+# Install dependencies in system Python (for FastAPI)
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install dependencies in Blender's Python (for rendering)
+RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir numpy==1.21.6 pandas==1.3.4
 
 # Copy application code
 COPY . .
