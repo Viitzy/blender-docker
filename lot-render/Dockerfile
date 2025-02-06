@@ -1,26 +1,59 @@
-FROM python:3.10-slim
+FROM ubuntu:bionic
 
-# Install system dependencies required for Psycopg2 compilation
-RUN apt-get update && apt-get install -y libpq-dev gcc 
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    libfreetype6 \
+    libglu1-mesa \
+    libxi6 \
+    libxrender1 \
+    xz-utils \
+    unzip \
+    p7zip-full \
+    python3-pip \
+    && apt-get -y autoremove \
+    && rm -rf /var/lib/apt/lists/*
 
-# Defina o diretório de trabalho no contêiner
+# Set Blender variables
+ENV BLENDER_VERSION="2.83.0"
+ENV BLENDER_PACKAGE_NAME="blender-${BLENDER_VERSION}-linux64"
+ENV BLENDER_PACKAGE_URL="https://download.blender.org/release/Blender2.83/${BLENDER_PACKAGE_NAME}.tar.xz"
+ENV BLENDER_PATH="/usr/local/blender"
+ENV BLENDER_PYTHON_PATH="${BLENDER_PATH}/2.83/python/bin"
+ENV PYTHONPATH="/app"
+
+# Download and install Blender
+WORKDIR /tmp
+RUN curl -OL ${BLENDER_PACKAGE_URL} \
+    && tar -xJf ${BLENDER_PACKAGE_NAME}.tar.xz -C /tmp \
+    && rm -f ${BLENDER_PACKAGE_NAME}.tar.xz \
+    && mv /tmp/${BLENDER_PACKAGE_NAME} ${BLENDER_PATH}
+
+# Create addons directory
+RUN mkdir -p ${BLENDER_PATH}/2.83/scripts/addons
+
+# Install pip in Blender's Python
+RUN ${BLENDER_PATH}/2.83/python/bin/python3.7m -m ensurepip
+
+# Set up working directory
 WORKDIR /app
 
-# Adicionar PYTHONPATH
-ENV PYTHONPATH="/app:${PYTHONPATH}"
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt
+RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --upgrade pip \
+    && ${BLENDER_PATH}/2.83/python/bin/pip3 install numpy pandas
 
-# Copy `messaging`,`shared` and `properties` directories into the container
-COPY ./messaging /app/messaging
-COPY ./shared /app/shared
-COPY ./account /app/account
+# Copy application code
+COPY . .
 
-# Instale as dependências do projeto
-RUN pip install --no-cache-dir -r account/requirements.txt
+# Set environment variable for Blender path
+ENV BLENDER_PATH=${BLENDER_PATH}/blender
 
-# Mudar para o diretório específico se necessário, por exemplo:
-WORKDIR /app/account/src
+# Expose the FastAPI port
+EXPOSE 80
 
-# Comando para executar a aplicação usando o uvicorn, se aplicável
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Set the entry point to run the FastAPI server
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
 
 
