@@ -130,7 +130,9 @@ def process_lot_images_for_site(
 
             # Get original image path from detection result path
             result_path = Path(doc["original_detection"]["result_path"])
-            image_name = f"satellite_{doc['id'].split('_')[1]}.jpg"
+            # Extract coordinates from the ID
+            coords = doc["id"].split("_")[1:]  # This will get both lat and lng
+            image_name = f"satellite_{coords[0]}_{coords[1]}.jpg"
             # Look for image in the satellite images directory
             image_path = (
                 result_path.parent.parent / "satellite_images" / image_name
