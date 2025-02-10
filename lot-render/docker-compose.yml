@@ -18,8 +18,8 @@ services:
         source: ./models
         target: /app/models
       - type: bind
-        source: /tmp
-        target: /tmp
+        source: ./generated
+        target: /app/generated
     environment:
       - PYTHONPATH=/app
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}

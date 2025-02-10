@@ -45,168 +45,162 @@ async def analyze_lot_service(
         coord_id = f"{lat_str}_{lng_str}"
         lot_id = f"test_{coord_id}"
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_dir = Path(temp_dir)
-            print(
-                f"\nAnalysis - Created temporary directory: {temp_dir}"
-            )  # Debug print
+        # Set up base directory for generated files
+        base_dir = Path("/app/generated")
+        base_dir.mkdir(exist_ok=True)
 
-            # Set up directories
-            output_path = temp_dir / f"satellite_{coord_id}.jpg"
-            detection_dir = temp_dir / "lots_detection"
-            json_dir = detection_dir / "json"
-            masks_dir = detection_dir / "masks"
-            results_dir = detection_dir / "detections"
-            processed_dir = detection_dir / "processed"
-            site_images_dir = detection_dir / "site_images"
-            colors_dir = detection_dir / "colors"
-            elevations_dir = detection_dir / "elevations"
-            utm_dir = detection_dir / "utm"
+        # Create a unique directory for this analysis using timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        analysis_dir = base_dir / f"analysis_{timestamp}_{coord_id}"
+        analysis_dir.mkdir(exist_ok=True)
+        print(f"\nAnalysis - Created analysis directory: {analysis_dir}")
 
-            # Create all directories
-            for directory in [
-                json_dir,
-                masks_dir,
-                results_dir,
-                processed_dir,
-                site_images_dir,
-                colors_dir,
-                elevations_dir,
-                utm_dir,
-            ]:
-                directory.mkdir(parents=True, exist_ok=True)
-                print(
-                    f"Analysis - Created directory: {directory}"
-                )  # Debug print
+        # Set up directories
+        output_path = analysis_dir / f"satellite_{coord_id}.jpg"
+        detection_dir = analysis_dir / "lots_detection"
+        json_dir = detection_dir / "json"
+        masks_dir = detection_dir / "masks"
+        results_dir = detection_dir / "detections"
+        processed_dir = detection_dir / "processed"
+        site_images_dir = detection_dir / "site_images"
+        colors_dir = detection_dir / "colors"
+        elevations_dir = detection_dir / "elevations"
+        utm_dir = detection_dir / "utm"
 
-            # Get satellite image
-            print(
-                f"Analysis - Getting satellite image for coordinates: {latitude}, {longitude}"
-            )  # Debug print
-            image_content = google_maps.get_satellite_image(
-                lat=latitude,
-                lng=longitude,
-                zoom=zoom,
-                size="640x640",
-                scale=2,
-            )
+        # Create all directories
+        for directory in [
+            json_dir,
+            masks_dir,
+            results_dir,
+            processed_dir,
+            site_images_dir,
+            colors_dir,
+            elevations_dir,
+            utm_dir,
+        ]:
+            directory.mkdir(parents=True, exist_ok=True)
+            print(f"Analysis - Created directory: {directory}")
 
-            # Save image
-            print(
-                f"Analysis - Saving satellite image to: {output_path}"
-            )  # Debug print
-            with open(output_path, "wb") as f:
-                f.write(image_content)
+        # Get satellite image
+        print(
+            f"Analysis - Getting satellite image for coordinates: {latitude}, {longitude}"
+        )
+        image_content = google_maps.get_satellite_image(
+            lat=latitude,
+            lng=longitude,
+            zoom=zoom,
+            size="640x640",
+            scale=2,
+        )
 
-            # Prepare items list for detection
-            items_list = [
-                {
-                    "image_path": str(output_path),
-                    "object_id": lot_id,
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "dimensions": "1280x1280",  # 640x640 with scale=2
-                    "zoom": zoom,
-                    "street_name": "Test Street",
-                    "google_place_id": "test_place",
-                    "year": datetime.now().year,
-                }
-            ]
+        # Save image
+        print(f"Analysis - Saving satellite image to: {output_path}")
+        with open(output_path, "wb") as f:
+            f.write(image_content)
 
-            # Execute lot detection
-            print(
-                f"Analysis - Starting lot detection with model: {model_path}"
-            )  # Debug print
-            processed_docs = detect_lots_and_save(
-                model_path=model_path,
-                items_list=items_list,
-                output_dir=str(detection_dir),
-                adjust_mask=True,
-            )
+        # Prepare items list for detection
+        items_list = [
+            {
+                "image_path": str(output_path),
+                "object_id": lot_id,
+                "latitude": latitude,
+                "longitude": longitude,
+                "dimensions": "1280x1280",  # 640x640 with scale=2
+                "zoom": zoom,
+                "street_name": "Test Street",
+                "google_place_id": "test_place",
+                "year": datetime.now().year,
+            }
+        ]
 
-            if not processed_docs:
-                return {
-                    "id": lot_id,
-                    "status": "error",
-                    "error": "No lots detected in the image",
-                }
+        # Execute lot detection
+        print(f"Analysis - Starting lot detection with model: {model_path}")
+        processed_docs = detect_lots_and_save(
+            model_path=model_path,
+            items_list=items_list,
+            output_dir=str(detection_dir),
+            adjust_mask=True,
+        )
 
-            # Move satellite image to correct location
-            satellite_images_dir = detection_dir / "satellite_images"
-            satellite_images_dir.mkdir(exist_ok=True)
-            new_image_path = satellite_images_dir / output_path.name
-            print(
-                f"Analysis - Moving satellite image from {output_path} to {new_image_path}"
-            )  # Debug print
-            os.rename(output_path, new_image_path)
+        if not processed_docs:
+            return {
+                "id": lot_id,
+                "status": "error",
+                "error": "No lots detected in the image",
+            }
 
-            # Process lot areas
-            print("Analysis - Processing lot areas")  # Debug print
-            area_stats = process_lot_areas(
-                input_dir=str(json_dir),
-                output_dir=str(processed_dir),
-                confidence_threshold=confidence,
-            )
+        # Move satellite image to correct location
+        satellite_images_dir = detection_dir / "satellite_images"
+        satellite_images_dir.mkdir(exist_ok=True)
+        new_image_path = satellite_images_dir / output_path.name
+        print(
+            f"Analysis - Moving satellite image from {output_path} to {new_image_path}"
+        )
+        os.rename(output_path, new_image_path)
 
-            # Process site images
-            watermark_path = (
-                Path(__file__).parent.parent.parent.parent
-                / "assets"
-                / "watermark.png"
-            )
-            site_processed = process_lot_images_for_site(
-                input_dir=str(processed_dir),
-                output_dir=str(site_images_dir),
-                hex_color="#e8f34e",
-                watermark_path=str(watermark_path),
-                confidence=confidence,
-            )
+        # Process lot areas
+        print("Analysis - Processing lot areas")
+        area_stats = process_lot_areas(
+            input_dir=str(json_dir),
+            output_dir=str(processed_dir),
+            confidence_threshold=confidence,
+        )
 
-            # Process colors
-            colors_processed = process_lot_colors(
-                input_dir=str(processed_dir),
-                output_dir=str(colors_dir),
-                max_points=130,
-                dark_threshold=70,
-                bright_threshold=215,
-                confidence=confidence,
-            )
+        # Process site images
+        watermark_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "assets"
+            / "watermark.png"
+        )
+        site_processed = process_lot_images_for_site(
+            input_dir=str(processed_dir),
+            output_dir=str(site_images_dir),
+            hex_color="#e8f34e",
+            watermark_path=str(watermark_path),
+            confidence=confidence,
+        )
 
-            # Process elevations
-            elevations_processed = process_lots_elevation(
-                input_dir=str(colors_dir),
-                output_dir=str(elevations_dir),
-                api_key=google_maps.api_key,
-                db_path=str(detection_dir / "elevation_cache.db"),
-                confidence=confidence,
-            )
+        # Process colors
+        colors_processed = process_lot_colors(
+            input_dir=str(processed_dir),
+            output_dir=str(colors_dir),
+            max_points=130,
+            dark_threshold=70,
+            bright_threshold=215,
+            confidence=confidence,
+        )
 
-            # Process UTM coordinates
-            utm_processed = process_lots_utm_coordinates(
-                input_dir=str(elevations_dir),
-                output_dir=str(utm_dir),
-                confidence=confidence,
-            )
+        # Process elevations
+        elevations_processed = process_lots_elevation(
+            input_dir=str(colors_dir),
+            output_dir=str(elevations_dir),
+            api_key=google_maps.api_key,
+            db_path=str(detection_dir / "elevation_cache.db"),
+            confidence=confidence,
+        )
 
-            # Combine all results
-            result = processed_docs[0]
-            result.update(
-                {
-                    "area_stats": area_stats,
-                    "site_images": (
-                        site_processed[0] if site_processed else None
-                    ),
-                    "colors": colors_processed[0] if colors_processed else None,
-                    "elevations": (
-                        elevations_processed[0]
-                        if elevations_processed
-                        else None
-                    ),
-                    "utm": utm_processed[0] if utm_processed else None,
-                }
-            )
+        # Process UTM coordinates
+        utm_processed = process_lots_utm_coordinates(
+            input_dir=str(elevations_dir),
+            output_dir=str(utm_dir),
+            confidence=confidence,
+        )
 
-            return {"id": lot_id, "status": "success", "results": result}
+        # Combine all results
+        result = processed_docs[0]
+        result.update(
+            {
+                "area_stats": area_stats,
+                "site_images": (site_processed[0] if site_processed else None),
+                "colors": colors_processed[0] if colors_processed else None,
+                "elevations": (
+                    elevations_processed[0] if elevations_processed else None
+                ),
+                "utm": utm_processed[0] if utm_processed else None,
+            }
+        )
+
+        return {"id": lot_id, "status": "success", "results": result}
 
     except Exception as e:
         return {
