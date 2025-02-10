@@ -131,7 +131,11 @@ def process_lot_images_for_site(
             # Get original image path from detection result path
             result_path = Path(doc["original_detection"]["result_path"])
             image_name = f"satellite_{doc['id'].split('_')[1]}.jpg"
-            image_path = result_path.parent.parent / image_name
+            image_path = (
+                result_path.parent.parent.parent / image_name
+            )  # Go up one more level
+
+            print(f"Looking for image at: {image_path}")  # Debug print
 
             # Load image
             image = cv2.imread(str(image_path))
