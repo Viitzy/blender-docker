@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   lot-render:
     build:
@@ -6,8 +8,12 @@ services:
     ports:
       - "8000:80"
     volumes:
-      - ./src:/app/src
-      - ./input:/app/input  # For CSV files
+      - type: bind
+        source: ./src
+        target: /app/src
+      - type: bind
+        source: ./input
+        target: /app/input
     environment:
       - PYTHONPATH=/app
     restart: unless-stopped
