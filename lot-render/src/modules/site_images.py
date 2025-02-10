@@ -129,14 +129,14 @@ def process_lot_images_for_site(
                 continue
 
             # Get original image path from detection result path
-            result_path = doc["original_detection"]["result_path"]
-            image_dir = os.path.dirname(os.path.dirname(result_path))
+            result_path = Path(doc["original_detection"]["result_path"])
             image_name = f"satellite_{doc['id'].split('_')[1]}.jpg"
-            image_path = os.path.join(image_dir, "..", image_name)
+            image_path = result_path.parent.parent / image_name
 
             # Load image
-            image = cv2.imread(image_path)
+            image = cv2.imread(str(image_path))
             if image is None:
+                print(f"Error loading image: {image_path}")
                 continue
 
             # Get mask
@@ -147,6 +147,7 @@ def process_lot_images_for_site(
 
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             if mask is None:
+                print(f"Error loading mask: {mask_path}")
                 continue
 
             # Get contours
