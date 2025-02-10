@@ -47,6 +47,9 @@ async def analyze_lot_service(
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir = Path(temp_dir)
+            print(
+                f"\nAnalysis - Created temporary directory: {temp_dir}"
+            )  # Debug print
 
             # Set up directories
             output_path = temp_dir / f"satellite_{coord_id}.jpg"
@@ -72,8 +75,14 @@ async def analyze_lot_service(
                 utm_dir,
             ]:
                 directory.mkdir(parents=True, exist_ok=True)
+                print(
+                    f"Analysis - Created directory: {directory}"
+                )  # Debug print
 
             # Get satellite image
+            print(
+                f"Analysis - Getting satellite image for coordinates: {latitude}, {longitude}"
+            )  # Debug print
             image_content = google_maps.get_satellite_image(
                 lat=latitude,
                 lng=longitude,
@@ -83,6 +92,9 @@ async def analyze_lot_service(
             )
 
             # Save image
+            print(
+                f"Analysis - Saving satellite image to: {output_path}"
+            )  # Debug print
             with open(output_path, "wb") as f:
                 f.write(image_content)
 
@@ -102,6 +114,9 @@ async def analyze_lot_service(
             ]
 
             # Execute lot detection
+            print(
+                f"Analysis - Starting lot detection with model: {model_path}"
+            )  # Debug print
             processed_docs = detect_lots_and_save(
                 model_path=model_path,
                 items_list=items_list,
@@ -116,7 +131,17 @@ async def analyze_lot_service(
                     "error": "No lots detected in the image",
                 }
 
+            # Move satellite image to correct location
+            satellite_images_dir = detection_dir / "satellite_images"
+            satellite_images_dir.mkdir(exist_ok=True)
+            new_image_path = satellite_images_dir / output_path.name
+            print(
+                f"Analysis - Moving satellite image from {output_path} to {new_image_path}"
+            )  # Debug print
+            os.rename(output_path, new_image_path)
+
             # Process lot areas
+            print("Analysis - Processing lot areas")  # Debug print
             area_stats = process_lot_areas(
                 input_dir=str(json_dir),
                 output_dir=str(processed_dir),

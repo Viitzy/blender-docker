@@ -34,12 +34,23 @@ def detect_lots_and_save(
         try:
             # Load and resize image
             image_path = item["image_path"]
+            print(
+                f"\nDetection - Input image path: {image_path}"
+            )  # Debug print
+            print(f"Detection - Output directory: {output_dir}")  # Debug print
+
             image = cv2.imread(image_path)
             if image is None:
+                print(
+                    f"Detection - Error: Could not load image at {image_path}"
+                )
                 continue
 
             # Get image dimensions
             height, width = image.shape[:2]
+            print(
+                f"Detection - Image dimensions: {width}x{height}"
+            )  # Debug print
 
             # Run detection
             results = model(image)[0]
@@ -47,6 +58,9 @@ def detect_lots_and_save(
             # Process detections
             for i, detection in enumerate(results.boxes.data):
                 confidence = float(detection[4])
+                print(
+                    f"Detection - Found lot {i} with confidence: {confidence}"
+                )  # Debug print
 
                 # Get mask
                 if len(results.masks) > i:
@@ -67,6 +81,7 @@ def detect_lots_and_save(
                 # Save mask
                 mask_filename = f"mask_{doc_id}.png"
                 mask_path = os.path.join(output_dir, "masks", mask_filename)
+                print(f"Detection - Saving mask to: {mask_path}")  # Debug print
                 cv2.imwrite(mask_path, mask)
 
                 # Save detection visualization
@@ -80,6 +95,9 @@ def detect_lots_and_save(
                 result_path = os.path.join(
                     output_dir, "detections", result_filename
                 )
+                print(
+                    f"Detection - Saving result to: {result_path}"
+                )  # Debug print
                 cv2.imwrite(result_path, result_image)
 
                 # Create document
@@ -108,6 +126,7 @@ def detect_lots_and_save(
                 # Save JSON
                 json_filename = f"detection_{doc_id}.json"
                 json_path = os.path.join(output_dir, "json", json_filename)
+                print(f"Detection - Saving JSON to: {json_path}")  # Debug print
 
                 with open(json_path, "w") as f:
                     json.dump(doc, f, indent=2)
@@ -115,7 +134,9 @@ def detect_lots_and_save(
                 processed_docs.append(doc)
 
         except Exception as e:
-            print(f"Error processing {item['image_path']}: {str(e)}")
+            print(
+                f"Detection - Error processing {item['image_path']}: {str(e)}"
+            )
             continue
 
     return processed_docs
