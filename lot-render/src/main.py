@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import lots
+from src.routers import lots
 
 app = FastAPI(title="Lot Render API")
 
