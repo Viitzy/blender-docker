@@ -124,9 +124,10 @@ def process_lot_colors(
             # Get original image path
             result_path = Path(doc["original_detection"]["result_path"])
             image_name = f"satellite_{doc['id'].split('_')[1]}.jpg"
+            # Look for image in the satellite images directory
             image_path = (
-                result_path.parent.parent.parent / image_name
-            )  # Go up one more level
+                result_path.parent.parent / "satellite_images" / image_name
+            )
 
             print(f"Looking for image at: {image_path}")  # Debug print
 
