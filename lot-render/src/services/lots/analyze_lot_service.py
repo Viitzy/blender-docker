@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 import tempfile
 
-from ...modules.satellite import get_satellite_image
+from ...apis.google_maps import GoogleMapsAPI
 from ...modules.detection import detect_lots_and_save
 from ...modules.area import process_lot_areas
 from ...modules.site_images import process_lot_images_for_site
@@ -31,12 +31,13 @@ async def analyze_lot_service(
     7. UTM coordinate conversion
     """
     try:
-        # Load environment variables
-        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-        model_path = os.getenv("YOLO_MODEL_PATH")
+        # Initialize Google Maps API
+        google_maps = GoogleMapsAPI()
 
-        if not all([api_key, model_path]):
-            raise ValueError("Required environment variables not found")
+        # Load environment variables
+        model_path = os.getenv("YOLO_MODEL_PATH")
+        if not model_path:
+            raise ValueError("YOLO_MODEL_PATH not found")
 
         # Create unique ID for the lot
         lat_str = f"{latitude:.14f}"
@@ -73,11 +74,10 @@ async def analyze_lot_service(
                 directory.mkdir(parents=True, exist_ok=True)
 
             # Get satellite image
-            image_content = get_satellite_image(
+            image_content = google_maps.get_satellite_image(
                 lat=latitude,
                 lng=longitude,
                 zoom=zoom,
-                api_key=api_key,
                 size="640x640",
                 scale=2,
             )
@@ -151,7 +151,7 @@ async def analyze_lot_service(
             elevations_processed = process_lots_elevation(
                 input_dir=str(colors_dir),
                 output_dir=str(elevations_dir),
-                api_key=api_key,
+                api_key=google_maps.api_key,
                 db_path=str(detection_dir / "elevation_cache.db"),
                 confidence=confidence,
             )

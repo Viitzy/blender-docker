@@ -11,7 +11,7 @@ def get_satellite_image(
     scale: int = 2,
 ) -> bytes:
     """
-    Get a satellite image from Google Maps Static API.
+    Get satellite image from Google Maps Static API.
 
     Args:
         lat: Latitude
@@ -36,6 +36,9 @@ def get_satellite_image(
     }
 
     response = requests.get(base_url, params=params)
-    response.raise_for_status()
+    if response.status_code != 200:
+        raise Exception(
+            f"Error getting image: {response.status_code} - {response.text}"
+        )
 
     return response.content
