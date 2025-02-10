@@ -14,6 +14,17 @@ services:
       - type: bind
         source: ./input
         target: /app/input
+      - type: bind
+        source: ./models
+        target: /app/models
     environment:
       - PYTHONPATH=/app
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - YOLO_MODEL_PATH=/app/models/best.pt
+      - BLENDER_PATH=/usr/local/blender/blender
+      - MONGO_CONNECTION_STRING=${MONGO_CONNECTION_STRING}
+      - MONGO_DB_NAME=${MONGO_DB_NAME}
+      - MONGO_COLLECTION_LOTS_COORDS=${MONGO_COLLECTION_LOTS_COORDS}
+    env_file:
+      - .env
     restart: unless-stopped

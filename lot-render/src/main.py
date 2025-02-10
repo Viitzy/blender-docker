@@ -13,7 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# Include routers with prefix
 app.include_router(lots.router, prefix="/api/v1")
 
 

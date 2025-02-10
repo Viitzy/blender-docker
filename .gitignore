@@ -5,3 +5,4 @@ lot-render/etapa1-gethome-90ec2c4cffef.json
 lot-render/.env
 .DS_Store
 lot_generation/
+lot-render/models/best.pt
