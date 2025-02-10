@@ -7,6 +7,7 @@ import os
 from pydantic import BaseModel
 from datetime import datetime
 import json
+from typing import Optional, Dict, Any
 
 from ..services.lots.analyze_lot_service import analyze_lot_service
 
@@ -23,8 +24,8 @@ class LotAnalysisRequest(BaseModel):
 class LotAnalysisResponse(BaseModel):
     id: str
     status: str
-    results: dict | None = None
-    error: str | None = None
+    results: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
 
 @router.post(
