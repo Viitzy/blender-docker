@@ -59,12 +59,12 @@ async def process_lot_service(
         initial_data = {
             "id": doc_id,
             "point_colors": {
-                "points_lat_lon": [[p["lat"], p["lon"]] for p in points]
+                "points_lat_lon": [[p.lat, p.lon] for p in points]
             },
         }
 
         # Calculate area
-        points_lat_lon = [[p["lat"], p["lon"]] for p in points]
+        points_lat_lon = [[p.lat, p.lon] for p in points]
         area_m2 = calculate_geo_area(points_lat_lon)
 
         # Update MongoDB with area
