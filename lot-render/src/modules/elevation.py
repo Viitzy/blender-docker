@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Tuple
 import requests
 import time
 import numpy as np
+import traceback
 
 
 def init_elevation_cache(db_path: str) -> None:
@@ -101,7 +102,7 @@ def get_elevations_with_cache(
     # Verifica cache para cada localização
     for lat, lon in locations:
         cursor.execute(
-            "SELECT elevation FROM elevations WHERE latitude = ? AND longitude = ?",
+            "SELECT elevation FROM elevations WHERE lat = ? AND lon = ?",
             (round(lat, 6), round(lon, 6)),
         )
         row = cursor.fetchone()
@@ -130,7 +131,7 @@ def get_elevations_with_cache(
 
         # Atualiza cache
         cursor.executemany(
-            "INSERT OR REPLACE INTO elevations (latitude, longitude, elevation) VALUES (?, ?, ?)",
+            "INSERT OR REPLACE INTO elevations (lat, lon, elevation) VALUES (?, ?, ?)",
             [
                 (round(lat, 6), round(lon, 6), elev)
                 for (lat, lon), elev in zip(
