@@ -25,28 +25,28 @@ def run_blender_process(
         # Obtém os caminhos das variáveis de ambiente se não fornecidos
         blender_executable = blender_path or os.getenv("BLENDER_PATH")
         current_dir = Path(__file__).parent
-        script_path = str(current_dir / "terrain_3d_blender.py")
+        script_path = str(current_dir / "generate_terrain_glb.py")
         if not os.path.exists(script_path):
             raise ValueError(f"Script Python não encontrado em: {script_path}")
 
-        blender_script = script_path or os.getenv("BLENDER_SCRIPT_PATH")
-
-        if not blender_executable or not blender_script:
+        if not blender_executable:
             raise ValueError(
-                "Blender path e script path devem ser fornecidos ou definidos nas variáveis de ambiente"
+                "Blender path deve ser fornecido ou definido na variável de ambiente BLENDER_PATH"
             )
 
         print(f"Usando Blender em: {blender_executable}")
-        print(f"Usando script em: {blender_script}")
+        print(f"Usando script em: {script_path}")
+        print(f"Arquivo CSV de entrada: {input_csv}")
+        print(f"Arquivo GLB de saída: {output_glb}")
 
         # Verifica se os arquivos existem
         if not os.path.exists(blender_executable):
             raise FileNotFoundError(
                 f"Executável do Blender não encontrado: {blender_executable}"
             )
-        if not os.path.exists(blender_script):
+        if not os.path.exists(input_csv):
             raise FileNotFoundError(
-                f"Script do Blender não encontrado: {blender_script}"
+                f"Arquivo CSV de entrada não encontrado: {input_csv}"
             )
 
         # Cria o diretório de saída se não existir
@@ -57,7 +57,7 @@ def run_blender_process(
             blender_executable,
             "--background",
             "--python",
-            blender_script,
+            script_path,
             "--",
             input_csv,
             output_glb,
@@ -71,7 +71,7 @@ def run_blender_process(
             command,
             capture_output=True,
             text=True,
-            cwd=os.path.dirname(blender_script),
+            cwd=os.path.dirname(script_path),
         )
 
         # Imprime a saída do Blender para debug
