@@ -1,6 +1,4 @@
-from typing import Dict, List, Optional, Tuple
-from pymongo import MongoClient
-from bson import ObjectId
+from typing import Dict, List
 import numpy as np
 from geopy.distance import geodesic
 import os

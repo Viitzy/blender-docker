@@ -1,6 +1,4 @@
-from typing import Dict, Optional, Any, List
-from pymongo import MongoClient
-from bson import ObjectId
+from typing import Dict, Any, List
 import os
 import traceback
 from pathlib import Path
