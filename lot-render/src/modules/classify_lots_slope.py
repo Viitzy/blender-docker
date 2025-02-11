@@ -1,9 +1,14 @@
-from typing import List, Dict
+from typing import List, Dict, Any, Optional
 import pandas as pd
 import math
 import os
 import json
 import traceback
+import numpy as np
+import tempfile
+from pymongo import MongoClient
+from bson import ObjectId
+from google.cloud import storage
 
 
 def read_lot_data(csv_file: str) -> pd.DataFrame:
@@ -36,8 +41,8 @@ def get_front_and_back_centroids(df: pd.DataFrame):
         "y": df_front["y"].mean(),
         "z": df_front["z"].mean(),
     }
-    # Se quiser, pode considerar apenas “fundo” vs. “frente”,
-    # ou então “todo o lote” vs. “frente”.
+    # Se quiser, pode considerar apenas "fundo" vs. "frente",
+    # ou então "todo o lote" vs. "frente".
     back_centroid = {
         "x": df_back["x"].mean(),
         "y": df_back["y"].mean(),
@@ -102,149 +107,186 @@ def get_altitude_stats(df: pd.DataFrame) -> dict:
     return {"z_min": z_min, "z_max": z_max, "amplitude": amplitude}
 
 
-def classify_lot_slope(csv_file: str) -> dict:
+def classify_lot_slope(csv_path: str) -> Dict[str, Any]:
     """
-    Lê o CSV de um lote, calcula declividade, encontra valores de altitude (mínimo, máximo, amplitude)
-    e retorna um dicionário com todos esses resultados.
+    Classifica a declividade de um lote baseado nos dados do CSV.
+
+    Args:
+        csv_path (str): Caminho para o arquivo CSV com os pontos do lote
+
+    Returns:
+        Dict[str, Any]: Dicionário com informações de declividade
     """
-    # Passo 1: Ler o CSV
-    df = read_lot_data(csv_file)
+    try:
+        # Lê o CSV
+        df = pd.read_csv(csv_path)
 
-    # Passo 2: Calcular centróides (frente e fundo)
-    front_centroid, back_centroid = get_front_and_back_centroids(df)
+        # Obtém altitudes mínima e máxima
+        min_altitude = df["z"].min()
+        max_altitude = df["z"].max()
+        altitude_range = max_altitude - min_altitude
 
-    # Passo 3: Calcular declividade (%)
-    slope_percent = calculate_slope(front_centroid, back_centroid)
+        # Calcula a declividade em porcentagem
+        # Usando a fórmula: (diferença de altura / distância horizontal) * 100
+        points = df[["x", "y", "z"]].values
+        max_slope = 0
 
-    # Passo 4: Classificar
-    classification = classify_slope(slope_percent)
+        for i in range(len(points)):
+            for j in range(i + 1, len(points)):
+                p1 = points[i]
+                p2 = points[j]
 
-    # Passo 5: Obter estatísticas de altitude
-    alt_stats = get_altitude_stats(df)
+                # Calcula distância horizontal
+                distance = np.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+                if distance == 0:
+                    continue
 
-    # Montar resultado final
-    return {
-        "slope_percent": slope_percent,
-        "classification": classification,
-        "front_centroid": front_centroid,
-        "back_centroid": back_centroid,
-        "min_altitude": alt_stats["z_min"],
-        "max_altitude": alt_stats["z_max"],
-        "altitude_range": alt_stats["amplitude"],
-    }
+                # Calcula declividade
+                height_diff = abs(p2[2] - p1[2])
+                slope = (height_diff / distance) * 100
+                max_slope = max(max_slope, slope)
+
+        # Classifica a declividade
+        if max_slope <= 3:
+            classification = "Plano"
+        elif max_slope <= 8:
+            classification = "Suave ondulado"
+        elif max_slope <= 20:
+            classification = "Ondulado"
+        elif max_slope <= 45:
+            classification = "Forte ondulado"
+        elif max_slope <= 75:
+            classification = "Montanhoso"
+        else:
+            classification = "Escarpado"
+
+        return {
+            "slope_percent": float(max_slope),
+            "classification": classification,
+            "min_altitude": float(min_altitude),
+            "max_altitude": float(max_altitude),
+            "altitude_range": float(altitude_range),
+        }
+
+    except Exception as e:
+        print(f"Erro ao classificar declividade: {str(e)}")
+        raise
 
 
 def process_lots_slope(
-    input_dir: str,
-    output_dir: str,
-    db_path: str,
+    mongodb_uri: str,
+    year: str,
+    doc_id: str = None,
     confidence: float = 0.62,
-) -> List[Dict]:
+) -> None:
     """
-    Processa e classifica a inclinação dos lotes usando arquivos locais.
-    """
-    print("\n=== Iniciando processamento de inclinação dos lotes ===")
-    print(f"Filtro de confiança: >= {confidence}")
-    print(f"DB Path: {db_path}")
+    Processa a classificação de declividade para lotes específicos.
 
+    Args:
+        mongodb_uri (str): URI de conexão com MongoDB
+        year (str): Ano de referência
+        doc_id (str): ID específico do documento (opcional)
+        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
+    """
+    client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Inicializa cliente do Google Cloud Storage
+        storage_client = storage.Client()
 
-        # Lista todos os arquivos GLB no diretório de entrada
-        glb_files = [f for f in os.listdir(input_dir) if f.endswith(".glb")]
-        print(f"\nTotal de arquivos para processar: {len(glb_files)}")
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
 
-        processed_docs = []
-        errors = 0
+        # Prepara a query base
+        base_query = {
+            "year": year,
+            "csv_elevation_colors": {"$exists": True},
+            "slope_classify": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
 
-        for i, glb_file in enumerate(glb_files, 1):
+        # Adiciona doc_id à query se fornecido
+        if doc_id:
             try:
-                # Define nomes dos arquivos
-                base_name = os.path.splitext(glb_file)[0]
-                output_file = os.path.join(
-                    output_dir, f"{base_name}_slope.json"
-                )
-                input_glb = os.path.join(input_dir, glb_file)
+                base_query["_id"] = ObjectId(doc_id)
+            except Exception as e:
+                print(f"Erro ao converter doc_id para ObjectId: {str(e)}")
+                raise
 
-                # Procura o arquivo CSV correspondente
-                csv_dir = os.path.dirname(input_dir)
-                csv_dir = os.path.join(csv_dir, "csv")
-                csv_file = os.path.join(csv_dir, f"{base_name}.csv")
+        # Recupera documentos do MongoDB
+        documents = collection.find(base_query)
+        total_docs = collection.count_documents(base_query)
 
-                # Procura o JSON no diretório front
-                front_dir = os.path.dirname(input_dir)
-                front_dir = os.path.join(front_dir, "front")
-                json_file = os.path.join(front_dir, f"{base_name}.json")
+        print("\n=== Iniciando processamento de declividade ===")
+        print(f"Total de documentos a processar: {total_docs}")
+        print(f"Filtro de confiança: >= {confidence}")
 
-                # Verifica se já existe arquivo processado
-                if os.path.exists(output_file):
-                    print(
-                        f"\nArquivo {output_file} já processado, carregando dados..."
+        # Processa cada documento
+        success_count = 0
+        error_count = 0
+
+        for doc in documents:
+            try:
+                # Extrai o caminho do CSV do URL
+                csv_url = doc["csv_elevation_colors"]
+
+                # Extrai o caminho relativo do arquivo no bucket
+                # Remove o prefixo gs://
+                csv_path = csv_url.replace("gs://", "")
+                # Separa bucket e path
+                bucket_name, blob_path = csv_path.split("/", 1)
+                print(f"Bucket: {bucket_name}")
+                print(f"Caminho do blob CSV: {blob_path}")
+
+                # Cria diretório temporário
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Define caminho do arquivo temporário
+                    temp_csv = os.path.join(temp_dir, f"{doc['_id']}.csv")
+
+                    # Baixa o arquivo CSV do bucket
+                    bucket = storage_client.bucket(bucket_name)
+                    blob = bucket.blob(blob_path)
+                    blob.download_to_filename(temp_csv)
+
+                    print(f"Processando lote: {doc['_id']}")
+                    print(f"CSV baixado para: {temp_csv}")
+
+                    # Aplica a classificação
+                    result = classify_lot_slope(temp_csv)
+
+                    # Atualiza o documento no MongoDB
+                    collection.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"slope_classify": result}},
                     )
-                    with open(output_file, "r") as f:
-                        doc = json.load(f)
-                        processed_docs.append(doc)
-                    continue
 
-                # Verifica se existe o CSV
-                if not os.path.exists(csv_file):
-                    print(f"Arquivo CSV não encontrado: {csv_file}")
-                    continue
-
-                # Carrega o documento JSON original
-                if not os.path.exists(json_file):
-                    print(f"Arquivo JSON não encontrado: {json_file}")
-                    continue
-
-                with open(json_file, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
-                    continue
-
-                print(f"\nProcessando documento {i}/{len(glb_files)}")
-                print(f"ID: {doc['id']}")
-
-                # Calcula a inclinação usando o CSV
-                slope_info = classify_lot_slope(csv_file)
-
-                if slope_info:
-                    # Adiciona informações de inclinação ao documento
-                    doc["slope_info"] = slope_info
-
-                    # Salva o resultado
-                    with open(output_file, "w") as f:
-                        json.dump(doc, f, indent=2)
-
-                    processed_docs.append(doc)
-                    print(
-                        f"Inclinação calculada: {slope_info['slope_percent']:.2f}%"
-                    )
-                    print(f"Classificação: {slope_info['classification']}")
+                    success_count += 1
+                    print(f"✅ Lote {doc['_id']} processado com sucesso")
+                    print(f"Declividade: {result['slope_percent']:.2f}%")
+                    print(f"Classificação: {result['classification']}")
 
             except Exception as e:
-                errors += 1
-                print(f"Erro ao processar arquivo {glb_file}: {str(e)}")
+                error_count += 1
+                print(f"❌ Erro ao processar lote {doc['_id']}: {str(e)}")
                 traceback.print_exc()
                 continue
 
+        # Imprime resumo
         print("\n=== Resumo do processamento ===")
-        print(f"Total de arquivos: {len(glb_files)}")
-        print(f"Processados com sucesso: {len(processed_docs)}")
-        print(f"Erros: {errors}")
-        print("============================\n")
-
-        return processed_docs
+        print(f"Total processado: {total_docs}")
+        print(f"Sucessos: {success_count}")
+        print(f"Erros: {error_count}")
 
     except Exception as e:
-        print(f"Erro durante o processamento: {str(e)}")
-        traceback.print_exc()
-        return []
+        print(f"Erro geral no processamento: {str(e)}")
+        raise
+
+    finally:
+        # Fecha a conexão com segurança
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")

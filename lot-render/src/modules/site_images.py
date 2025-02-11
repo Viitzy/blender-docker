@@ -5,6 +5,11 @@ from typing import Dict, List, Any
 import cv2
 import numpy as np
 from PIL import Image
+import tempfile
+import traceback
+from pymongo import MongoClient
+from google.cloud import storage
+from bson.objectid import ObjectId
 
 
 def hex_to_bgr(hex_color: str) -> tuple:
@@ -123,79 +128,81 @@ def yolov8_annotation_to_contours(annotation: str, image_shape: tuple) -> list:
 
 
 def process_lot_images_for_site(
-    input_dir: str,
-    output_dir: str,
+    mongodb_uri: str,
+    bucket_name: str,
     hex_color: str,
     watermark_path: str,
+    doc_id: str = None,
     confidence: float = 0.62,
 ) -> list:
     """
-    Processa imagens de lotes para exibição no site usando arquivos locais.
+    Processa imagens de lotes para exibição no site e salva no GCS.
 
     Args:
-        input_dir (str): Diretório contendo os arquivos JSON de detecção
-        output_dir (str): Diretório para salvar as imagens processadas
+        mongodb_uri (str): URI de conexão com MongoDB
+        bucket_name (str): Nome do bucket no GCS
         hex_color (str): Cor em hexadecimal para a máscara
         watermark_path (str): Caminho para a imagem de marca d'água
-        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
+        doc_id (str): ID específico do documento (opcional)
+        confidence (float): Valor mínimo de confiança
 
     Returns:
         list: Lista de documentos processados
     """
     print(f"\nIniciando processamento de imagens para o site")
-    print(f"Diretório de entrada: {input_dir}")
     print(f"Filtro de confiança: >= {confidence}")
 
+    client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Inicializa cliente do GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
 
-        # Lista todos os arquivos JSON no diretório de entrada
-        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
-        print(f"Encontrados {len(json_files)} arquivos JSON para processar")
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
 
-        if not json_files:
-            print(f"Nenhum arquivo encontrado para processar")
+        # Monta a query base
+        query = {
+            "site_image_url": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
+
+        # Se foi especificado um ID, adiciona à query
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+            print(f"Processando documento específico: {doc_id}")
+
+        total_docs = collection.count_documents(query)
+        print(f"Total de documentos para processar: {total_docs}")
+
+        if total_docs == 0:
+            print("Nenhum documento encontrado para processar")
             return []
 
         processed_docs = []
 
-        for json_file in json_files:
+        for doc in collection.find(query):
             try:
-                json_path = os.path.join(input_dir, json_file)
-                print(f"\nProcessando arquivo: {json_file}")
+                doc_id = str(doc["_id"])
+                print(f"\nProcessando documento: {doc_id}")
 
-                # Carrega o documento JSON
-                with open(json_path, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
+                # Obtém a imagem original do satélite
+                image_content = doc.get("satellite_image")
+                if not image_content:
+                    print("Imagem do satélite não encontrada")
                     continue
 
-                # Obtém o caminho da imagem original
-                image_path = doc.get("metadata", {}).get("original_image")
-                if not image_path or not os.path.exists(image_path):
-                    print(f"Imagem original não encontrada: {image_path}")
-                    continue
-
-                # Carrega e verifica a imagem original
-                image = cv2.imread(image_path)
+                # Converte bytes para numpy array
+                nparr = np.frombuffer(image_content, np.uint8)
+                image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if image is None:
-                    print(f"Falha ao carregar a imagem")
+                    print("Falha ao decodificar a imagem")
                     continue
-
-                print(f"Dimensões da imagem original: {image.shape}")
 
                 # Redimensiona para 1280x1280 se necessário
                 if image.shape[:2] != (1280, 1280):
-                    print(f"Redimensionando imagem para 1280x1280")
                     image = cv2.resize(
                         image, (1280, 1280), interpolation=cv2.INTER_LANCZOS4
                     )
@@ -204,17 +211,13 @@ def process_lot_images_for_site(
                 mask_annotation = doc.get("adjusted_detection", {}).get(
                     "annotation"
                 ) or doc.get("original_detection", {}).get("annotation")
-
                 if not mask_annotation:
-                    print(f"Nenhuma anotação de máscara encontrada")
+                    print("Nenhuma anotação de máscara encontrada")
                     continue
 
                 # Converte anotação em contornos
                 contours = yolov8_annotation_to_contours(
                     mask_annotation, image.shape[:2]
-                )
-                print(
-                    f"Contornos gerados com shape da imagem: {image.shape[:2]}"
                 )
 
                 # Aplica máscara e marca d'água
@@ -225,32 +228,49 @@ def process_lot_images_for_site(
                     watermark_path=watermark_path,
                 )
 
-                # Gera nome do arquivo de saída
-                output_filename = f"site_{os.path.splitext(json_file)[0]}.jpg"
-                output_path = os.path.join(output_dir, output_filename)
+                # Salva temporariamente
+                with tempfile.NamedTemporaryFile(
+                    suffix=".jpg", delete=False
+                ) as temp_file:
+                    temp_path = temp_file.name
+                    encode_params = [
+                        cv2.IMWRITE_JPEG_QUALITY,
+                        95,
+                        cv2.IMWRITE_JPEG_OPTIMIZE,
+                        1,
+                    ]
+                    cv2.imwrite(temp_path, processed_image, encode_params)
 
-                # Salva a imagem processada com alta qualidade
-                encode_params = [
-                    cv2.IMWRITE_JPEG_QUALITY,
-                    95,
-                    cv2.IMWRITE_JPEG_OPTIMIZE,
-                    1,
-                ]
-                cv2.imwrite(output_path, processed_image, encode_params)
+                    # Upload para GCS
+                    blob_path = f"site_images/{doc_id}.jpg"
+                    blob = bucket.blob(blob_path)
+                    blob.upload_from_filename(temp_path)
 
-                processed_docs.append(
-                    {
-                        "object_id": doc.get("id"),
-                        "site_image_path": output_path,
-                        "original_image": image_path,
-                        "confidence": confidence_value,
-                    }
-                )
+                    # Gera URL pública
+                    site_image_url = f"gs://{bucket_name}/{blob_path}"
 
-                print(f"Imagem processada salva em: {output_path}")
+                    # Atualiza MongoDB
+                    collection.update_one(
+                        {"_id": doc["_id"]},
+                        {"$set": {"site_image_url": site_image_url}},
+                    )
+
+                    processed_docs.append(
+                        {
+                            "id": doc_id,
+                            "site_image_url": site_image_url,
+                            "confidence": doc.get("confidence"),
+                        }
+                    )
+
+                    print(f"Imagem processada e salva: {site_image_url}")
+
+                # Remove arquivo temporário
+                os.unlink(temp_path)
 
             except Exception as e:
-                print(f"Erro ao processar arquivo {json_file}: {str(e)}")
+                print(f"Erro ao processar documento {doc_id}: {str(e)}")
+                traceback.print_exc()
                 continue
 
         print(
@@ -261,3 +281,11 @@ def process_lot_images_for_site(
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
         raise
+
+    finally:
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")

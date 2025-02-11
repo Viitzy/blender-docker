@@ -26,6 +26,9 @@ class DetectLotRequest(BaseModel):
     longitude: float
     zoom: int = 20
     confidence: float = 0.62
+    object_id: Optional[str] = None
+    street_name: Optional[str] = None
+    year: Optional[str] = None
 
 
 class DetectLotResponse(BaseModel):
@@ -36,6 +39,7 @@ class DetectLotResponse(BaseModel):
 
 
 class ProcessLotRequest(BaseModel):
+    doc_id: str
     points: List[Point]
     latitude: float  # Centro do lote
     longitude: float  # Centro do lote
@@ -61,6 +65,9 @@ async def detect_lot(request: DetectLotRequest):
         longitude=request.longitude,
         zoom=request.zoom,
         confidence=request.confidence,
+        object_id=request.object_id,
+        street_name=request.street_name,
+        year=request.year,
     )
 
     return DetectLotResponse(**result)
@@ -76,8 +83,14 @@ async def process_lot(request: ProcessLotRequest):
     3. Color processing
     4. Elevation processing
     5. UTM coordinate conversion
+    6. Cardinal points
+    7. Front points
+    8. CSV generation
+    9. GLB generation
+    10. Slope classification
     """
     result = await process_lot_service(
+        doc_id=request.doc_id,
         points=request.points,
         latitude=request.latitude,
         longitude=request.longitude,

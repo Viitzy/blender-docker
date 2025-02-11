@@ -4,10 +4,10 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List
 import numpy as np
+from bson import ObjectId
 
 from ...apis.google_maps import GoogleMapsAPI
-from ...modules.area import process_lot_areas
-from ...modules.site_images import process_lot_images_for_site
+from ...modules.area import calculate_geo_area
 from ...modules.colors import process_lot_colors
 from ...modules.elevation import process_lots_elevation
 from ...modules.utm import process_lots_utm_coordinates
@@ -16,9 +16,12 @@ from ...modules.process_front_points import process_front_points
 from ...modules.generate_csv import process_lots_csv
 from ...modules.generate_glb import process_lots_glb
 from ...modules.classify_lots_slope import process_lots_slope
+from ...database.mongodb import MongoDB
+from ...modules.site_images import process_lot_images_for_site
 
 
 async def process_lot_service(
+    doc_id: str,
     points: List[Dict[str, float]],
     latitude: float,
     longitude: float,
@@ -29,234 +32,193 @@ async def process_lot_service(
     Service that processes a lot based on its polygon points.
     """
     try:
-        # Initialize Google Maps API
+        # Initialize services
+        mongo_db = MongoDB()
         google_maps = GoogleMapsAPI()
 
-        # Create unique ID for the lot
-        lat_str = f"{latitude:.14f}"
-        lng_str = f"{longitude:.14f}"
-        coord_id = f"{lat_str}_{lng_str}"
-        lot_id = f"test_{coord_id}"
-
-        # Set up base directory for generated files
-        base_dir = Path("/app/generated")
-        base_dir.mkdir(exist_ok=True)
-
-        # Create a unique directory for this analysis using timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        analysis_dir = base_dir / f"analysis_{timestamp}_{coord_id}"
-        analysis_dir.mkdir(exist_ok=True)
-        print(f"\nProcessing - Created analysis directory: {analysis_dir}")
-
-        # Set up directories
-        output_path = analysis_dir / f"satellite_{coord_id}.jpg"
-        detection_dir = analysis_dir / "lots_detection"
-        json_dir = detection_dir / "json"
-        processed_dir = detection_dir / "processed"
-        site_images_dir = detection_dir / "site_images"
-        colors_dir = detection_dir / "colors"
-        elevations_dir = detection_dir / "elevations"
-        utm_dir = detection_dir / "utm"
-
-        # Create all directories
-        for directory in [
-            json_dir,
-            processed_dir,
-            site_images_dir,
-            colors_dir,
-            elevations_dir,
-            utm_dir,
-        ]:
-            directory.mkdir(parents=True, exist_ok=True)
-            print(f"Processing - Created directory: {directory}")
-
-        # Get satellite image for visualization
-        print(
-            f"Processing - Getting satellite image for coordinates: {latitude}, {longitude}"
-        )
-        image_content = google_maps.get_satellite_image(
-            lat=latitude,
-            lng=longitude,
-            zoom=zoom,
-            size="640x640",
-            scale=2,
-        )
-
-        # Save image
-        print(f"Processing - Saving satellite image to: {output_path}")
-        with open(output_path, "wb") as f:
-            f.write(image_content)
-
-        # Create initial document with polygon points
-        width = height = 1280  # 640x640 with scale=2
-        polygon_points = []
-        for point in points:
-            lat, lon = point["lat"], point["lon"]
-            # Convert lat/lon back to normalized coordinates
-            x, y = lat_lon_to_pixel_normalized(
-                lat=lat,
-                lon=lon,
-                center_lat=latitude,
-                center_lon=longitude,
-                zoom=zoom,
-                scale=2,
-                image_width=width,
-                image_height=height,
-            )
-            polygon_points.append([x, y])
-
-        # Create the document with the polygon
-        doc = {
-            "id": lot_id,
-            "original_detection": {
-                "polygon": polygon_points,
-                "confidence": confidence,
-                "annotation": points_to_yolov8_annotation(polygon_points),
-            },
+        # Create initial data for processing
+        initial_data = {
+            "id": doc_id,
             "metadata": {
                 "latitude": latitude,
                 "longitude": longitude,
-                "dimensions": f"{width}x{height}",
+                "dimensions": "1280x1280",
                 "zoom": zoom,
-                "street_name": "Test Street",
-                "google_place_id": "test_place",
-                "year": datetime.now().year,
-                "original_image": str(output_path),
+            },
+            "point_colors": {
+                "points_lat_lon": [[p["lat"], p["lon"]] for p in points]
             },
         }
 
-        # Save initial document
-        json_path = json_dir / f"{lot_id}.json"
-        with open(json_path, "w") as f:
-            json.dump(doc, f, indent=2)
+        # Calculate area
+        points_lat_lon = [[p["lat"], p["lon"]] for p in points]
+        area_m2 = calculate_geo_area(points_lat_lon)
 
-        # Process lot areas
-        print("Processing - Processing lot areas")
-        area_stats = process_lot_areas(
-            input_dir=str(json_dir),
-            output_dir=str(processed_dir),
-            confidence_threshold=confidence,
+        # Update MongoDB with area
+        await mongo_db.update_detection(
+            doc_id,
+            {
+                "area_m2": area_m2,
+                "points_lat_lon": points_lat_lon,
+                "metadata": initial_data["metadata"],
+            },
         )
 
-        # Process site images
-        watermark_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "assets"
-            / "watermark.png"
-        )
-        site_processed = process_lot_images_for_site(
-            input_dir=str(processed_dir),
-            output_dir=str(site_images_dir),
-            hex_color="#e8f34e",
-            watermark_path=str(watermark_path),
-            confidence=confidence,
-        )
+        # Get the document from MongoDB to proceed with next steps
+        doc = await mongo_db.get_detection(doc_id)
+        if not doc:
+            return {
+                "id": doc_id,
+                "status": "error",
+                "error": "Document not found in MongoDB",
+            }
 
         # Process colors
         colors_processed = process_lot_colors(
-            input_dir=str(processed_dir),
-            output_dir=str(colors_dir),
+            mongodb_uri=mongo_db.connection_string,
             max_points=130,
             dark_threshold=70,
             bright_threshold=215,
             confidence=confidence,
+            doc_id=doc_id,
         )
 
-        # Process elevations
-        elevations_processed = process_lots_elevation(
-            input_dir=str(colors_dir),
-            output_dir=str(elevations_dir),
-            api_key=google_maps.api_key,
-            db_path=str(detection_dir / "elevation_cache.db"),
-            confidence=confidence,
-        )
+        if colors_processed:
+            point_colors = colors_processed[0].get("point_colors", {})
+            await mongo_db.update_detection(
+                doc_id, {"point_colors": point_colors}
+            )
 
-        # Process UTM coordinates
-        utm_processed = process_lots_utm_coordinates(
-            input_dir=str(elevations_dir),
-            output_dir=str(utm_dir),
-            confidence=confidence,
-        )
+            # Process site images
+            watermark_path = (
+                Path(__file__).parent.parent.parent.parent
+                / "assets"
+                / "watermark.png"
+            )
+            site_images_processed = process_lot_images_for_site(
+                mongodb_uri=mongo_db.connection_string,
+                bucket_name="gethome-lots",
+                hex_color="#e8f34e",
+                watermark_path=str(watermark_path),
+                doc_id=doc_id,
+                confidence=confidence,
+            )
 
-        print("\nIniciando processamento de pontos cardeais...")
-        cardinal_dir = os.path.join(detection_dir, "cardinal")
+            if site_images_processed:
+                site_image = site_images_processed[0]
+                await mongo_db.update_detection(
+                    doc_id, {"site_image_url": site_image.get("site_image_url")}
+                )
 
-        cardinal_processed = process_cardinal_points(
-            input_dir=utm_dir,
-            output_dir=cardinal_dir,
-            distance_meters=5,
-            confidence=confidence,
-        )
+            # # Process elevations
+            # elevations_processed = process_lots_elevation(
+            #     mongodb_uri=mongo_db.connection_string,
+            #     api_key=google_maps.api_key,
+            #     doc_id=doc_id,
+            #     confidence=confidence,
+            # )
 
-        # Process front points
-        front_dir = os.path.join(detection_dir, "front")
-        maps_dir = Path(detection_dir) / "maps"
-        front_processed = process_front_points(
-            input_dir=cardinal_dir,
-            output_dir=front_dir,
-            google_maps_api_key=google_maps.api_key,
-            create_maps=False,
-            confidence=confidence,
-            maps_output_dir=maps_dir,
-        )
+            # if elevations_processed:
+            #     doc = elevations_processed[0]  # Get updated document
 
-        # Process CSV
-        print("\nIniciando processamento de CSVs...")
-        csv_dir = os.path.join(detection_dir, "csv")
+            #     # Process UTM coordinates
+            #     utm_processed = process_lots_utm_coordinates(
+            #         mongodb_uri=mongo_db.connection_string,
+            #         doc_id=doc_id,
+            #         confidence=confidence,
+            #     )
 
-        csv_processed = process_lots_csv(
-            input_dir=front_dir,
-            output_dir=csv_dir,
-            confidence=confidence,
-        )
+            #     if utm_processed:
+            #         doc = utm_processed[0]  # Get updated document
 
-        # Process GLB
-        print("\nIniciando processamento de GLBs...")
-        glb_dir = os.path.join(detection_dir, "glb")
+            #         # Process cardinal points
+            #         cardinal_processed = process_cardinal_points(
+            #             mongodb_uri=mongo_db.connection_string,
+            #             distance_meters=5,
+            #             doc_id=doc_id,
+            #             confidence=confidence,
+            #         )
 
-        glb_processed = process_lots_glb(
-            input_dir=csv_dir,
-            output_dir=glb_dir,
-            confidence=confidence,
-        )
+            #         if cardinal_processed:
+            #             point_colors = cardinal_processed[0].get(
+            #                 "point_colors", {}
+            #             )
+            #             await mongo_db.update_detection(
+            #                 doc_id, {"point_colors": point_colors}
+            #             )
 
-        # Process slope
-        slope_dir = os.path.join(detection_dir, "slope")
-        db_path = os.path.join(detection_dir, "slope_cache.db")
+            #             # Process front points
+            #             front_processed = process_front_points(
+            #                 mongodb_uri=mongo_db.connection_string,
+            #                 google_maps_api_key=google_maps.api_key,
+            #                 create_maps=False,
+            #                 doc_id=doc_id,
+            #                 confidence=confidence,
+            #             )
 
-        slope_processed = process_lots_slope(
-            input_dir=glb_dir,
-            output_dir=slope_dir,
-            db_path=db_path,
-            confidence=confidence,
-        )
+            #             if front_processed:
+            #                 point_colors = front_processed[0].get(
+            #                     "point_colors", {}
+            #                 )
+            #                 await mongo_db.update_detection(
+            #                     doc_id, {"point_colors": point_colors}
+            #                 )
 
-        # Combine all results
-        result = doc
-        result.update(
-            {
-                "area_stats": area_stats,
-                "site_images": (site_processed[0] if site_processed else None),
-                "colors": colors_processed[0] if colors_processed else None,
-                "elevations": (
-                    elevations_processed[0] if elevations_processed else None
-                ),
-                "utm": utm_processed[0] if utm_processed else None,
-            }
-        )
+            #                 # Process CSV
+            #                 csv_processed = process_lots_csv(
+            #                     mongodb_uri=mongo_db.connection_string,
+            #                     bucket_name="gethome-lots",
+            #                     year=str(datetime.now().year),
+            #                     doc_id=doc_id,
+            #                     confidence=confidence,
+            #                 )
 
-        return {
-            "id": lot_id,
-            "status": "success",
-            "results": result,
-        }
+            #                 if csv_processed:
+            #                     # TODO: Upload CSV to cloud storage and update MongoDB with URL
+            #                     csv_url = f"csv_url_for_{doc_id}"  # Placeholder
+            #                     await mongo_db.update_detection(
+            #                         doc_id, {"csv_elevation_colors": csv_url}
+            #                     )
+
+            #                     # Process GLB (only if CSV was processed)
+            #                     if doc.get("csv_elevation_colors"):
+            #                         glb_processed = process_lots_glb(
+            #                             input_data=csv_processed[0],
+            #                             confidence=confidence,
+            #                         )
+
+            #                         if glb_processed:
+            #                             # TODO: Upload GLB to cloud storage and update MongoDB with URL
+            #                             glb_url = f"glb_url_for_{doc_id}"  # Placeholder
+            #                             await mongo_db.update_detection(
+            #                                 doc_id,
+            #                                 {"glb_elevation_file": glb_url},
+            #                             )
+
+            #                             # Process slope
+            #                             slope_processed = process_lots_slope(
+            #                                 mongodb_uri=mongo_db.connection_string,
+            #                                 year=str(datetime.now().year),
+            #                                 doc_id=doc_id,
+            #                                 confidence=confidence,
+            #                             )
+
+            #                             if slope_processed:
+            #                                 slope_data = slope_processed[0].get(
+            #                                     "slope_info", {}
+            #                                 )
+            #                                 await mongo_db.update_detection(
+            #                                     doc_id,
+            #                                     {"slope_classify": slope_data},
+            #                                 )
+
+        # Get final document
+        final_doc = await mongo_db.get_detection(doc_id)
+
+        return {"id": doc_id, "status": "success", "results": final_doc}
 
     except Exception as e:
-        return {
-            "id": f"error_{datetime.now().timestamp()}",
-            "status": "error",
-            "error": str(e),
-        }
+        return {"id": doc_id, "status": "error", "error": str(e)}
 
 
 def lat_lon_to_pixel_normalized(

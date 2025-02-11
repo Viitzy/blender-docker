@@ -9,6 +9,9 @@ from .pixel_to_geo import pixel_to_latlon
 from .lot_colors_adjustment import correct_colors
 import pandas as pd
 import traceback
+import random
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 
 def save_visualizations(
@@ -120,24 +123,25 @@ def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
 
 
 def process_lot_colors(
-    input_dir: str,
-    output_dir: str,
+    mongodb_uri: str,
+    output_folder: str = None,
     max_points: int = 130,
     dark_threshold: int = 70,
     bright_threshold: int = 215,
     confidence: float = 0.62,
+    doc_id: str = None,
 ) -> list:
     """
-    Processa as cores dos lotes usando arquivos locais, adiciona coordenadas geográficas
-    e corrige cores escuras e claras.
+    Processa cores dos lotes usando MongoDB.
 
     Args:
-        input_dir (str): Diretório contendo os arquivos JSON processados
-        output_dir (str): Pasta para salvar visualizações
+        mongodb_uri (str): URI de conexão com MongoDB
+        output_folder (str): Diretório para salvar visualizações (opcional)
         max_points (int): Número máximo de pontos por lote
-        dark_threshold (int): Limite para cores escuras
-        bright_threshold (int): Limite para cores claras
-        confidence (float): Valor mínimo de confiança para processar o documento
+        dark_threshold (int): Limiar para cores escuras
+        bright_threshold (int): Limiar para cores claras
+        confidence (float): Valor mínimo de confiança
+        doc_id (str): ID específico do documento (opcional)
 
     Returns:
         list: Lista de documentos processados
@@ -149,74 +153,42 @@ def process_lot_colors(
     print(f"- Threshold claro: {bright_threshold}")
     print(f"- Filtro de confiança: >= {confidence}")
 
+    client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
 
-        # Lista todos os arquivos JSON no diretório de entrada
-        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
-        total_docs = len(json_files)
+        # Monta a query base
+        query = {
+            "point_colors.points_lat_lon": {"$exists": True},
+            "point_colors.points_colors": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
+
+        # Se foi especificado um ID, adiciona à query
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+            print(f"Processando documento específico: {doc_id}")
+
+        total_docs = collection.count_documents(query)
         print(f"\nTotal de documentos para processar: {total_docs}")
 
         processed_docs = []
         processed = 0
         errors = 0
 
-        for json_file in json_files:
+        for doc in collection.find(query):
             try:
-                # Carrega o documento JSON
-                json_path = os.path.join(input_dir, json_file)
-                with open(json_path, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
-                    continue
-
                 processed += 1
                 print(
                     f"\n--- Processando documento {processed}/{total_docs} ---"
                 )
-                print(f"ID: {doc['id']}")
-                print(
-                    f"Street: {doc.get('metadata', {}).get('street_name', 'N/A')}"
-                )
+                print(f"ID: {doc['_id']}")
+                print(f"Street: {doc.get('street_name', 'N/A')}")
 
-                # Carrega a imagem original
-                image_path = doc.get("metadata", {}).get("original_image")
-                if not image_path or not os.path.exists(image_path):
-                    print(f"Imagem original não encontrada: {image_path}")
-                    # Tenta encontrar a imagem no diretório satellite_images
-                    analysis_dir = Path(input_dir).parent.parent
-                    satellite_images_dir = (
-                        analysis_dir / "lots_detection" / "satellite_images"
-                    )
-                    image_name = f"satellite_{doc['id'].split('test_')[1]}.jpg"
-                    image_path = str(satellite_images_dir / image_name)
-                    print(f"Tentando caminho alternativo: {image_path}")
-                    if not os.path.exists(image_path):
-                        print(
-                            f"Imagem também não encontrada no caminho alternativo"
-                        )
-                        errors += 1
-                        continue
-
-                image = cv2.imread(image_path)
-                if image is None:
-                    print("Erro ao carregar imagem, pulando documento")
-                    errors += 1
-                    continue
-
-                height, width = image.shape[:2]
-                print(f"Dimensões da imagem: {width}x{height}")
-
-                # Usa a área já calculada ou calcula se necessário
+                # Verifica se tem área
                 area = doc.get("area_m2")
                 if area is None:
                     print("Área não encontrada no documento")
@@ -225,32 +197,25 @@ def process_lot_colors(
 
                 print(f"Área do lote: {area:.2f} m²")
 
-                # Cria máscara do polígono
-                print("Gerando máscara do polígono...")
-                mask = np.zeros((height, width), dtype=np.uint8)
-                annotation = doc.get("adjusted_detection", {}).get(
-                    "annotation"
-                ) or doc.get("original_detection", {}).get("annotation")
-
-                if not annotation:
-                    print("Anotação não encontrada")
+                # Obtém os pontos lat/lon
+                points_lat_lon = doc.get("points_lat_lon")
+                if not points_lat_lon:
+                    print("Pontos lat/lon não encontrados")
                     errors += 1
                     continue
 
-                points = annotation.split()[1:]
-                polygon_points = []
+                # Calcula o número de pontos baseado na área
+                n_points = min(compute_number_of_points(area), max_points)
+                print(f"Número de pontos a processar: {n_points}")
 
-                for i in range(0, len(points), 2):
-                    x = float(points[i]) * width
-                    y = float(points[i + 1]) * height
-                    polygon_points.append([int(x), int(y)])
-
-                cv2.fillPoly(mask, [np.array(polygon_points)], 1)
-
-                # Gera pontos internos
-                print("Gerando pontos internos...")
-                points_inside = get_points_inside_mask(mask, area)
-                print(f"Pontos gerados: {len(points_inside)}")
+                # Seleciona pontos aleatoriamente se necessário
+                if len(points_lat_lon) > n_points:
+                    indices = np.random.choice(
+                        len(points_lat_lon), size=n_points, replace=False
+                    )
+                    selected_points = [points_lat_lon[i] for i in indices]
+                else:
+                    selected_points = points_lat_lon
 
                 # Processa cores e coordenadas
                 print("Processando cores e coordenadas...")
@@ -264,37 +229,26 @@ def process_lot_colors(
                 center_lon = metadata.get("longitude")
                 zoom = metadata.get("zoom", 20)
 
-                for x, y in points_inside:
-                    # Processa cores
-                    bgr_color = image[y, x]
-                    rgb_color = (
-                        int(bgr_color[2]),
-                        int(bgr_color[1]),
-                        int(bgr_color[0]),
-                    )
-                    hex_color = rgb_to_hex(rgb_color)
-                    colors.append(hex_color)
-                    colors_rgb.append(rgb_color)
-
-                    # Normaliza pontos
-                    normalized_points.append(
-                        [
-                            round(float(x) / width, 3),
-                            round(float(y) / height, 3),
-                        ]
-                    )
-
-                    # Calcula coordenadas geográficas
-                    lat, lon = pixel_to_latlon(
-                        pixel_x=x,
-                        pixel_y=y,
+                for lat, lon in selected_points:
+                    # Converte para coordenadas normalizadas
+                    x, y = pixel_to_latlon(
+                        lat=lat,
+                        lon=lon,
                         center_lat=center_lat,
                         center_lon=center_lon,
                         zoom=zoom,
                         scale=2,
-                        image_width=width,
-                        image_height=height,
+                        image_width=1280,
+                        image_height=1280,
                     )
+
+                    # Gera uma cor da terra
+                    r, g, b = random_earthy_color()
+                    hex_color = rgb_to_hex((r, g, b))
+
+                    colors.append(hex_color)
+                    colors_rgb.append((r, g, b))
+                    normalized_points.append([round(x, 3), round(y, 3)])
                     geo_points.append([round(lat, 6), round(lon, 6)])
 
                 # Correção de cores
@@ -316,19 +270,20 @@ def process_lot_colors(
                     hex_color = rgb_to_hex(rgb)
                     colors_adjusted.append(hex_color)
 
-                # Salva visualizações
-                print("Salvando visualizações...")
-                save_visualizations(
-                    image,
-                    polygon_points,
-                    points_inside,
-                    colors_rgb,
-                    df_corrected,
-                    doc["id"],
-                    output_dir,
-                )
+                # Salva visualização se necessário
+                if output_folder:
+                    print("Salvando visualizações...")
+                    save_visualizations(
+                        image=None,  # Não temos mais a imagem
+                        polygon_points=None,  # Não temos mais os pontos do polígono
+                        points_inside=None,  # Não temos mais os pontos internos
+                        colors_rgb=colors_rgb,
+                        df_corrected=df_corrected,
+                        doc_id=str(doc["_id"]),
+                        output_folder=output_folder,
+                    )
 
-                # Prepara dados de cores para salvar
+                # Prepara dados de cores para atualizar
                 point_colors = {
                     "points": normalized_points,
                     "colors": colors,
@@ -336,22 +291,25 @@ def process_lot_colors(
                     "points_lat_lon": geo_points,
                 }
 
-                # Atualiza o documento com as cores processadas
-                doc["point_colors"] = point_colors
-
-                # Salva o documento atualizado
-                output_json_path = os.path.join(
-                    output_dir, f"colors_{doc['id']}.json"
+                # Atualiza MongoDB
+                print("Atualizando documento no MongoDB...")
+                result = collection.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"point_colors": point_colors}},
                 )
-                with open(output_json_path, "w") as f:
-                    json.dump(doc, f, indent=2)
 
-                processed_docs.append(doc)
-                print("Documento processado e salvo com sucesso!")
+                if result.modified_count > 0:
+                    doc["point_colors"] = point_colors
+                    processed_docs.append(doc)
+                    print("Documento atualizado com sucesso!")
+                else:
+                    print("Nenhuma atualização necessária")
 
             except Exception as e:
                 errors += 1
-                print(f"\nERRO ao processar arquivo {json_file}: {str(e)}")
+                print(
+                    f"\nERRO ao processar documento {doc.get('_id')}: {str(e)}"
+                )
                 traceback.print_exc()
                 continue
 
@@ -366,3 +324,12 @@ def process_lot_colors(
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
         raise
+
+    finally:
+        # Fecha a conexão com segurança
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")

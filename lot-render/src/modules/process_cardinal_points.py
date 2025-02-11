@@ -1,30 +1,33 @@
-from typing import Dict, List
-import numpy as np
-from geopy.distance import geodesic
 import os
 import json
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+import numpy as np
 import traceback
+from pymongo import MongoClient
+from bson import ObjectId
+from geopy.distance import geodesic
 
 
 def calculate_cardinal_points(
     center_lat: float, center_lon: float, distance_meters: float
 ) -> Dict[str, List[float]]:
     """
-    Calcula pontos cardeais a uma distância específica do centro.
+    Calcula pontos cardeais a partir de um ponto central.
 
     Args:
-        center_lat: Latitude do centro
-        center_lon: Longitude do centro
-        distance_meters: Distância em metros
+        center_lat (float): Latitude do centro
+        center_lon (float): Longitude do centro
+        distance_meters (float): Distância em metros
 
     Returns:
-        Dicionário com pontos cardeais
+        Dict[str, List[float]]: Dicionário com pontos cardeais
     """
     # Converte distância para graus (aproximadamente)
     distance_deg = distance_meters / 111320  # 1 grau ≈ 111.32 km no equador
 
+    # Calcula pontos cardeais
     cardinal_points = {
-        "center": [center_lat, center_lon],
         "north": [center_lat + distance_deg, center_lon],
         "south": [center_lat - distance_deg, center_lon],
         "east": [
@@ -37,31 +40,23 @@ def calculate_cardinal_points(
         ],
     }
 
-    # Verifica distâncias
-    for direction, point in cardinal_points.items():
-        if direction != "center":
-            actual_distance = geodesic(
-                (center_lat, center_lon), (point[0], point[1])
-            ).meters
-            print(f"Distância {direction}: {actual_distance:.2f}m")
-
     return cardinal_points
 
 
 def process_cardinal_points(
-    input_dir: str,
-    output_dir: str,
-    distance_meters: float,
+    mongodb_uri: str,
+    distance_meters: float = 5.0,
+    doc_id: Optional[str] = None,
     confidence: float = 0.62,
 ) -> List[Dict]:
     """
-    Processa e adiciona pontos cardeais para lotes usando arquivos locais.
+    Processa e adiciona pontos cardeais para lotes.
 
     Args:
-        input_dir (str): Diretório contendo os arquivos JSON processados
-        output_dir (str): Diretório para salvar os resultados
+        mongodb_uri (str): URI de conexão com MongoDB
         distance_meters (float): Distância em metros para os pontos cardeais
-        confidence (float): Valor mínimo de confiança para processar
+        doc_id (Optional[str]): ID opcional do documento específico
+        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
 
     Returns:
         List[Dict]: Lista de documentos processados
@@ -70,50 +65,40 @@ def process_cardinal_points(
     print(f"Distância: {distance_meters}m")
     print(f"Filtro de confiança: >= {confidence}")
 
+    client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
 
-        # Lista todos os arquivos JSON no diretório de entrada
-        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
-        print(f"\nTotal de arquivos para processar: {len(json_files)}")
+        # Prepara query
+        query = {
+            "point_colors.points_lat_lon": {"$exists": True},
+            "point_colors.cardinal_points": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
+
+        # Se foi especificado um ID, adiciona à query
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+            print(f"Processando documento específico: {doc_id}")
+
+        total_docs = collection.count_documents(query)
+        print(f"Total de documentos para processar: {total_docs}")
+
+        if total_docs == 0:
+            print("Nenhum documento encontrado")
+            return []
 
         processed_docs = []
         errors = 0
 
-        for i, json_file in enumerate(json_files, 1):
+        for doc in collection.find(query):
             try:
-                # Verifica se já existe arquivo processado
-                output_file = os.path.join(output_dir, f"cardinal_{json_file}")
-                if os.path.exists(output_file):
-                    print(
-                        f"\nArquivo {output_file} já processado, carregando dados..."
-                    )
-                    with open(output_file, "r") as f:
-                        doc = json.load(f)
-                        processed_docs.append(doc)
-                    continue
-
-                # Carrega o documento JSON
-                json_path = os.path.join(input_dir, json_file)
-                with open(json_path, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
-                    continue
-
-                print(f"\nProcessando documento {i}/{len(json_files)}")
-                print(f"ID: {doc['id']}")
-                print(
-                    f"Rua: {doc.get('metadata', {}).get('street_name', 'N/A')}"
-                )
+                doc_id = str(doc["_id"])
+                print(f"\nProcessando documento: {doc_id}")
+                print(f"Rua: {doc.get('street_name', 'N/A')}")
 
                 # Verifica se já tem point_colors
                 point_colors = doc.get("point_colors", {})
@@ -128,8 +113,8 @@ def process_cardinal_points(
                     )
                 else:
                     print("AVISO: Usando coordenadas do documento como centro")
-                    center_lat = doc.get("metadata", {}).get("latitude")
-                    center_lon = doc.get("metadata", {}).get("longitude")
+                    center_lat = doc.get("latitude")
+                    center_lon = doc.get("longitude")
 
                 if not (center_lat and center_lon):
                     print("ERRO: Não foi possível determinar o centro")
@@ -143,27 +128,34 @@ def process_cardinal_points(
 
                 # Adiciona pontos cardeais ao point_colors
                 point_colors["cardinal_points"] = cardinal_points
-                doc["point_colors"] = point_colors
 
-                # Salva o documento processado
-                with open(output_file, "w") as f:
-                    json.dump(doc, f, indent=2)
+                # Atualiza documento
+                result = collection.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"point_colors": point_colors}},
+                )
 
-                processed_docs.append(doc)
-                print("Documento processado e salvo com sucesso!")
-                print("Pontos cardeais adicionados:")
-                for direction, point in cardinal_points.items():
-                    print(f"  {direction}: ({point[0]:.6f}, {point[1]:.6f})")
+                if result.modified_count > 0:
+                    doc["point_colors"] = point_colors
+                    processed_docs.append(doc)
+                    print("Documento atualizado com sucesso")
+                    print("Pontos cardeais adicionados:")
+                    for direction, point in cardinal_points.items():
+                        print(
+                            f"  {direction}: ({point[0]:.6f}, {point[1]:.6f})"
+                        )
+                else:
+                    print("AVISO: Documento não foi modificado")
 
             except Exception as e:
                 errors += 1
-                print(f"Erro ao processar arquivo {json_file}: {str(e)}")
+                print(f"ERRO ao processar documento {doc.get('_id')}: {str(e)}")
                 traceback.print_exc()
-                continue
 
         print("\n=== Resumo do processamento ===")
-        print(f"Total de documentos: {len(json_files)}")
-        print(f"Processados com sucesso: {len(processed_docs)}")
+        if doc_id:
+            print(f"ID do documento: {doc_id}")
+        print(f"Total processado: {len(processed_docs)}")
         print(f"Erros: {errors}")
         print("============================\n")
 
@@ -172,3 +164,12 @@ def process_cardinal_points(
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
         raise
+
+    finally:
+        # Fecha a conexão com segurança
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")

@@ -81,76 +81,69 @@ def process_single_document(
 
 
 def process_front_points(
-    input_dir: str,
-    output_dir: str,
+    mongodb_uri: str,
     google_maps_api_key: str,
     create_maps: bool = False,
+    doc_id: str = None,
     confidence: float = 0.62,
-    maps_output_dir: Path = Path("outputs/maps"),
+    output_dir: Path = Path("/app/generated/maps"),
+    force_visualization: bool = True,
 ) -> List[Dict]:
     """
-    Processa lotes para identificar seus pontos frontais usando arquivos locais.
+    Processa lotes para identificar seus pontos frontais usando detecção baseada em ruas próximas.
 
     Args:
-        input_dir (str): Diretório contendo os arquivos JSON processados
-        output_dir (str): Diretório para salvar os resultados
+        mongodb_uri (str): URI de conexão com MongoDB
         google_maps_api_key (str): Chave da API do Google Maps
         create_maps (bool): Se deve criar mapas de visualização
-        confidence (float): Valor mínimo de confiança para processar
-        maps_output_dir (Path): Diretório onde os mapas serão salvos
+        doc_id (str): ID específico de documento para processar (opcional)
+        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
+        output_dir (Path): Diretório onde os mapas serão salvos (default: outputs/maps)
+        force_visualization (bool): Se True, gera visualização mesmo sem modificações no MongoDB
 
     Returns:
         List[Dict]: Lista de documentos processados
     """
-    results = []
+    processed_docs = []
+    client = None
+
     try:
         print("\n=== Iniciando processamento de pontos frontais ===")
         print(f"Filtro de confiança: >= {confidence}")
 
-        # Cria diretórios de saída se não existirem
-        os.makedirs(output_dir, exist_ok=True)
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
+
+        # Prepara query
+        query = {
+            "point_colors.points_lat_lon": {"$exists": True},
+            "point_colors.cardinal_points": {"$exists": True},
+            "point_colors.front_points": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
+
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+            print(f"Processando documento específico: {doc_id}")
+
+        total_lots = collection.count_documents(query)
+        print(f"Total de lotes para processar: {total_lots}")
+
+        # Criar diretório de saída se não existir
         if create_maps:
-            maps_output_dir.mkdir(parents=True, exist_ok=True)
-            print(f"\nDiretório de mapas: {maps_output_dir.absolute()}")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            print(f"\nDiretório de saída: {output_dir.absolute()}")
 
-        # Lista todos os arquivos JSON no diretório de entrada
-        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
-        total_lots = len(json_files)
-        print(f"\nTotal de lotes para processar: {total_lots}")
+        for i, lot in enumerate(collection.find(query), 1):
+            lot_id = str(lot.get("_id"))
+            print(f"\n--- Processando lote {i}/{total_lots} ---")
+            print(f"ID: {lot_id}")
 
-        for i, json_file in enumerate(json_files, 1):
             try:
-                # Verifica se já existe arquivo processado
-                output_file = os.path.join(output_dir, f"front_{json_file}")
-                if os.path.exists(output_file):
-                    print(
-                        f"\nArquivo {output_file} já processado, carregando dados..."
-                    )
-                    with open(output_file, "r") as f:
-                        doc = json.load(f)
-                        results.append(doc)
-                    continue
-
-                # Carrega o documento JSON
-                json_path = os.path.join(input_dir, json_file)
-                with open(json_path, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
-                    continue
-
-                print(f"\n--- Processando lote {i}/{total_lots} ---")
-                print(f"ID: {doc['id']}")
-
-                # 1. Processar coordenadas do lote
-                processed_lot = process_single_document(doc)
+                # 1. Processar coordenadas do lote usando process_masks
+                processed_lot = process_single_document(lot)
                 if not processed_lot:
                     print("ERRO: Falha ao processar coordenadas do lote")
                     continue
@@ -160,10 +153,7 @@ def process_front_points(
                 )
 
                 # 2. Processar círculo e obter pontos da rua
-                circle_result = process_lot_circle(
-                    processed_lot["coordinates"],
-                )
-
+                circle_result = process_lot_circle(processed_lot["coordinates"])
                 if not circle_result["success"]:
                     print(
                         f"ERRO: {circle_result.get('error', 'Falha ao processar círculo')}"
@@ -185,44 +175,93 @@ def process_front_points(
                     print("ERRO: Nenhum ponto de rua encontrado")
                     continue
 
+                # Encontrar os dois pontos do lote mais próximos dos pontos da rua
                 front_points = find_closest_points(
                     processed_lot["coordinates"],
                     circle_result["snapped_points"],
                 )
 
+                print("\nPontos frontais encontrados:")
+                print(f"- Total: {len(front_points)}")
+                for idx, point in enumerate(front_points):
+                    print(
+                        f"- Ponto {idx}: lat={point['lat']}, lng={point['lng']}"
+                    )
+
                 if not front_points:
                     print("ERRO: Não foi possível determinar pontos frontais")
                     continue
 
-                # 4. Atualizar documento
-                point_colors = doc.get("point_colors", {})
-                point_colors.update(
-                    {
-                        "front_points": front_points,
-                        "front_points_lat_lon": front_points,
-                        "street_points": circle_result["snapped_points"],
-                        "street_info": (
-                            circle_result["streets_info"][0]
-                            if circle_result["streets_info"]
-                            else None
-                        ),
-                    }
+                # 4. Atualizar documento no MongoDB
+                point_colors = lot.get("point_colors", {})
+
+                print("\nDados existentes em point_colors:")
+                for key in point_colors.keys():
+                    print(f"- {key}")
+
+                # Atualizar/adicionar front_points e front_points_lat_lon
+                updates = {
+                    "front_points": front_points,
+                    "front_points_lat_lon": front_points,  # Mesmos valores do front_points
+                    "street_points": circle_result["snapped_points"],
+                    "street_info": (
+                        circle_result["streets_info"][0]
+                        if circle_result["streets_info"]
+                        else None
+                    ),
+                }
+
+                # Verificar se houve mudança nos dados
+                current_front_points = point_colors.get("front_points", [])
+                current_front_points_lat_lon = point_colors.get(
+                    "front_points_lat_lon", []
                 )
 
-                doc["point_colors"] = point_colors
+                print("\nComparando dados atuais com novos:")
+                print(f"- Front points atuais: {len(current_front_points)}")
+                print(
+                    f"- Front points lat/lon atuais: {len(current_front_points_lat_lon)}"
+                )
+                print(f"- Novos front points: {len(front_points)}")
 
-                # Salvar documento processado
-                with open(output_file, "w") as f:
-                    json.dump(doc, f, indent=2)
+                # Atualizar apenas se os dados forem diferentes
+                if (
+                    current_front_points != front_points
+                    or current_front_points_lat_lon != front_points
+                ):
+                    point_colors.update(updates)
 
-                results.append(doc)
+                    print("\nTentando atualizar MongoDB com:")
+                    print(f"- Front points: {len(front_points)} pontos")
+                    print(f"- Front points lat/lon: {len(front_points)} pontos")
+                    print(
+                        f"- Street points: {len(circle_result['snapped_points'])} pontos"
+                    )
+                    print(
+                        f"- Street info: {'Sim' if circle_result['streets_info'] else 'Não'}"
+                    )
 
-                # Criar visualização se solicitado
-                if create_maps:
+                    result = collection.update_one(
+                        {"_id": lot["_id"]},
+                        {"$set": {"point_colors": point_colors}},
+                    )
+
+                    if result.modified_count > 0:
+                        print("\n✓ Documento atualizado com sucesso")
+                        lot["point_colors"] = point_colors
+                        processed_docs.append(lot)
+                    else:
+                        print("\n⚠ AVISO: Documento não foi modificado")
+                        print("- Verifique se houve erro na atualização")
+                else:
+                    print("\n⚠ AVISO: Dados idênticos aos existentes")
+                    print("- Nenhuma atualização necessária")
+
+                # Criar mapa de visualização se solicitado
+                if create_maps or force_visualization:
                     try:
                         save_path = (
-                            maps_output_dir
-                            / f"front_detection_{doc['id']}.html"
+                            output_dir / f"front_detection_{lot_id}.html"
                         )
                         visualization_data = {
                             "lot_coordinates": processed_lot["coordinates"],
@@ -234,29 +273,49 @@ def process_front_points(
                             ),
                         }
 
+                        print("\nCriando visualização:")
+                        print(f"- Caminho absoluto: {save_path.absolute()}")
+                        print(
+                            f"- Dados: {len(visualization_data['lot_coordinates'])} pontos do lote"
+                        )
+                        print(
+                            f"- Pontos na rua: {len(visualization_data['snapped_points'])}"
+                        )
+                        print(
+                            f"- Pontos frontais: {len(visualization_data['front_vertices'])}"
+                        )
+
                         visualize_lot_front(
                             result=visualization_data,
                             output_path=str(save_path),
                         )
-                        print(f"✓ Mapa salvo em: {save_path}")
+                        print("✓ Mapa salvo com sucesso")
                     except Exception as e:
-                        print(f"ERRO ao gerar visualização: {str(e)}")
+                        print(f"\n❌ ERRO ao gerar visualização: {str(e)}")
+                        print(traceback.format_exc())
 
             except Exception as e:
-                print(f"ERRO ao processar arquivo {json_file}: {str(e)}")
-                traceback.print_exc()
-
-        print("\n=== Resumo do processamento ===")
-        print(f"Total de lotes: {total_lots}")
-        print(f"Processados com sucesso: {len(results)}")
-        print("============================\n")
-
-        return results
+                print(f"\n❌ ERRO ao processar lote: {str(e)}")
+                print(traceback.format_exc())
 
     except Exception as e:
-        print(f"Erro durante o processamento: {str(e)}")
-        traceback.print_exc()
-        return results
+        print(f"ERRO crítico: {str(e)}")
+        print(traceback.format_exc())
+
+    finally:
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")
+
+        print("\n=== Resumo do processamento ===")
+        print(f"Total processado: {total_lots}")
+        print(f"Sucessos: {len(processed_docs)}")
+        print("============================\n")
+
+    return processed_docs
 
 
 def find_closest_points(

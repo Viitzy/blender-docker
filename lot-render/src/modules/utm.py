@@ -5,6 +5,8 @@ from typing import Dict, List, Any, Tuple
 import pyproj
 import traceback
 import utm
+from pymongo import MongoClient
+from bson import ObjectId
 
 
 def convert_to_utm(lat: float, lon: float) -> Tuple[float, float, int]:
@@ -35,17 +37,19 @@ def convert_to_utm(lat: float, lon: float) -> Tuple[float, float, int]:
 
 
 def process_lots_utm_coordinates(
-    input_dir: str,
-    output_dir: str,
+    mongodb_uri: str,
+    google_place_id: str = None,
+    doc_id: str = None,
     confidence: float = 0.62,
 ) -> List[Dict]:
     """
-    Processa coordenadas UTM para pontos de lotes usando arquivos locais.
+    Processa coordenadas UTM para pontos de lotes que já possuem lat/lon e elevação.
 
     Args:
-        input_dir (str): Diretório contendo os arquivos JSON com elevações
-        output_dir (str): Diretório para salvar os resultados
-        confidence (float): Valor mínimo de confiança para processar
+        mongodb_uri (str): URI de conexão com MongoDB
+        google_place_id (str): ID do local Google para filtrar
+        doc_id (str): ID específico do documento (opcional)
+        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
 
     Returns:
         List[Dict]: Lista de documentos processados
@@ -53,61 +57,48 @@ def process_lots_utm_coordinates(
     print("\n=== Iniciando processamento de coordenadas UTM ===")
     print(f"Filtro de confiança: >= {confidence}")
 
+    client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client.gethome
+        collection = db.lots_coords
 
-        # Lista todos os arquivos JSON no diretório de entrada
-        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
-        print(f"\nTotal de arquivos para processar: {len(json_files)}")
+        # Monta a query base
+        query = {
+            "point_colors.points_lat_lon": {"$exists": True},
+            "point_colors.lat_lon_elevation": {"$exists": True},
+            "point_colors.points_utm": {"$exists": False},
+            "confidence": {"$gte": confidence},
+        }
+
+        # Se foi especificado um ID ou google_place_id, adiciona à query
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+            print(f"Processando documento específico: {doc_id}")
+        elif google_place_id:
+            query["google_place_id"] = google_place_id
+            print(f"Processando todos os documentos para: {google_place_id}")
+
+        total_docs = collection.count_documents(query)
+        print(f"Total de documentos para processar: {total_docs}")
+
+        if total_docs == 0:
+            print("Nenhum documento encontrado para processar")
+            return []
 
         processed_docs = []
         errors = 0
 
-        for i, json_file in enumerate(json_files, 1):
+        for i, doc in enumerate(collection.find(query), 1):
             try:
-                # Verifica se já existe arquivo processado
-                output_file = os.path.join(output_dir, f"utm_{json_file}")
-                if os.path.exists(output_file):
-                    print(
-                        f"\nArquivo {output_file} já processado, carregando dados..."
-                    )
-                    with open(output_file, "r") as f:
-                        doc = json.load(f)
-                        processed_docs.append(doc)
-                    continue
-
-                # Carrega o documento JSON
-                json_path = os.path.join(input_dir, json_file)
-                with open(json_path, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
-                    )
-                    continue
-
-                print(f"\nProcessando documento {i}/{len(json_files)}")
-                print(f"ID: {doc['id']}")
-                print(
-                    f"Rua: {doc.get('metadata', {}).get('street_name', 'N/A')}"
-                )
+                print(f"\nProcessando documento {i}/{total_docs}")
+                print(f"ID: {doc['_id']}")
+                print(f"Rua: {doc.get('street_name', 'N/A')}")
 
                 # Obtém pontos lat/lon e elevações
-                point_colors = doc.get("point_colors", {})
-                points_lat_lon = point_colors.get("points_lat_lon")
-                elevations = point_colors.get("lat_lon_elevation")
-
-                if not points_lat_lon or not elevations:
-                    print(
-                        "Pontos lat/lon ou elevações não encontrados, pulando..."
-                    )
-                    continue
+                points_lat_lon = doc["point_colors"]["points_lat_lon"]
+                elevations = doc["point_colors"]["lat_lon_elevation"]
 
                 if len(points_lat_lon) != len(elevations):
                     print(
@@ -156,40 +147,48 @@ def process_lots_utm_coordinates(
                     )
 
                 # Atualiza documento
-                doc["point_colors"]["points_utm"] = points_utm
+                point_colors = doc["point_colors"]
+                point_colors["points_utm"] = points_utm
 
-                # Salva o documento processado
-                with open(output_file, "w") as f:
-                    json.dump(doc, f, indent=2)
+                result = collection.update_one(
+                    {"_id": doc["_id"]},
+                    {"$set": {"point_colors": point_colors}},
+                )
 
-                processed_docs.append(doc)
-                print(f"Documento processado e salvo com sucesso!")
+                if result.modified_count > 0:
+                    doc["point_colors"] = point_colors
+                    processed_docs.append(doc)
+                    print(f"Documento {doc['_id']} atualizado com sucesso")
 
-                # Calcula estatísticas das coordenadas
-                valid_points = [p for p in points_utm if p[0] is not None]
-                if valid_points:
-                    x_coords = [p[0] for p in valid_points]
-                    y_coords = [p[1] for p in valid_points]
-                    z_coords = [p[2] for p in valid_points]
-                    print(f"Estatísticas UTM:")
-                    print(
-                        f"X: min={min(x_coords):.1f}, max={max(x_coords):.1f}"
-                    )
-                    print(
-                        f"Y: min={min(y_coords):.1f}, max={max(y_coords):.1f}"
-                    )
-                    print(
-                        f"Z: min={min(z_coords):.1f}, max={max(z_coords):.1f}"
-                    )
+                    # Calcula estatísticas das coordenadas
+                    valid_points = [p for p in points_utm if p[0] is not None]
+                    if valid_points:
+                        x_coords = [p[0] for p in valid_points]
+                        y_coords = [p[1] for p in valid_points]
+                        z_coords = [p[2] for p in valid_points]
+                        print(f"Estatísticas UTM:")
+                        print(
+                            f"X: min={min(x_coords):.1f}, max={max(x_coords):.1f}"
+                        )
+                        print(
+                            f"Y: min={min(y_coords):.1f}, max={max(y_coords):.1f}"
+                        )
+                        print(
+                            f"Z: min={min(z_coords):.1f}, max={max(z_coords):.1f}"
+                        )
 
             except Exception as e:
                 errors += 1
-                print(f"Erro ao processar arquivo {json_file}: {str(e)}")
+                print(f"ERRO ao processar documento {doc.get('_id')}: {str(e)}")
                 traceback.print_exc()
                 continue
 
         print("\n=== Resumo do processamento UTM ===")
-        print(f"Total de documentos: {len(json_files)}")
+        if google_place_id:
+            print(f"Google Place ID: {google_place_id}")
+        if doc_id:
+            print(f"ID do documento: {doc_id}")
+        print(f"Total de documentos: {total_docs}")
         print(f"Processados com sucesso: {len(processed_docs)}")
         print(f"Erros: {errors}")
         print("================================\n")
@@ -199,3 +198,12 @@ def process_lots_utm_coordinates(
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
         raise
+
+    finally:
+        # Fecha a conexão com segurança
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")
