@@ -20,6 +20,19 @@ from ...database.mongodb import MongoDB
 from ...modules.site_images import process_lot_images_for_site
 
 
+def convert_objectid_to_string(obj):
+    """Convert ObjectId to string in a document recursively."""
+    if isinstance(obj, dict):
+        return {
+            key: convert_objectid_to_string(value) for key, value in obj.items()
+        }
+    elif isinstance(obj, list):
+        return [convert_objectid_to_string(item) for item in obj]
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    return obj
+
+
 async def process_lot_service(
     doc_id: str,
     points: List[Dict[str, float]],
@@ -222,8 +235,9 @@ async def process_lot_service(
             #                                     {"slope_classify": slope_data},
             #                                 )
 
-        # Get final document
+        # Get final document and convert ObjectId to string
         final_doc = await mongo_db.get_detection(doc_id)
+        final_doc = convert_objectid_to_string(final_doc)
 
         return {"id": doc_id, "status": "success", "results": final_doc}
 
