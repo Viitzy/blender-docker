@@ -14,6 +14,11 @@ RUN apt-get update && apt-get install -y \
     unzip \
     p7zip-full \
     software-properties-common \
+    zlib1g-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libfreetype6-dev \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
     && apt-get install -y \
@@ -49,8 +54,9 @@ RUN curl -OL ${BLENDER_PACKAGE_URL} \
 # Create addons directory
 RUN mkdir -p ${BLENDER_PATH}/2.83/scripts/addons
 
-# Install pip in Blender's Python
-RUN ${BLENDER_PATH}/2.83/python/bin/python3.7m -m ensurepip
+# Install pip in Blender's Python and upgrade it
+RUN ${BLENDER_PATH}/2.83/python/bin/python3.7m -m ensurepip && \
+    ${BLENDER_PATH}/2.83/python/bin/pip3 install --upgrade pip
 
 # Set up working directory
 WORKDIR /app
@@ -66,8 +72,7 @@ RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir \
     numpy==1.19.5 \
     pandas==1.1.5 \
     scipy==1.7.3 \
-    Pillow==8.4.0 \
-    mathutils==2.81.2
+    Pillow==8.4.0
 
 # Copy application code
 COPY . .
