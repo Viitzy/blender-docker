@@ -2044,12 +2044,31 @@ def change_yellow_points(points, colors):
 
 # ===========================================================================================================================
 def clear_scene():
-    # Seleciona todos os objetos na cena
+    """Limpa a cena atual"""
+    # Seleciona todos os objetos
     bpy.ops.object.select_all(action="SELECT")
-    # Exclui todos os objetos selecionados
-    bpy.ops.object.delete(use_global=False)
-    # Limpa os dados órfãos (malhas, materiais, etc.) para liberar memória
-    bpy.ops.outliner.orphans_purge(do_recursive=True)
+    # Deleta os objetos selecionados
+    bpy.ops.object.delete()
+
+    # Limpa materiais não utilizados
+    for material in bpy.data.materials:
+        if not material.users:
+            bpy.data.materials.remove(material)
+
+    # Limpa malhas não utilizadas
+    for mesh in bpy.data.meshes:
+        if not mesh.users:
+            bpy.data.meshes.remove(mesh)
+
+    # Limpa texturas não utilizadas
+    for texture in bpy.data.textures:
+        if not texture.users:
+            bpy.data.textures.remove(texture)
+
+    # Limpa imagens não utilizadas
+    for image in bpy.data.images:
+        if not image.users:
+            bpy.data.images.remove(image)
 
 
 def enable_obj_import_addon():
