@@ -5,54 +5,108 @@ from typing import Dict, List, Any
 import cv2
 import numpy as np
 from shapely.geometry import Polygon
+from .pixel_to_geo import pixel_to_latlon
+import math
 
 
-def calculate_lot_area(mask_path: str, metadata: Dict) -> float:
+def calculate_geo_area(points: list) -> float:
     """
-    Calculate lot area in square meters from mask and metadata.
+    Calcula a área de um polígono definido por coordenadas geográficas
+    usando a fórmula de Haversine.
 
-    Args:
-        mask_path: Path to mask image
-        metadata: Metadata with lat/lon and zoom
+    Parameters:
+        points: list - Lista de tuplas (lat, lon) definindo o polígono
 
     Returns:
-        Area in square meters
+        float - Área em metros quadrados
     """
-    # Load mask
-    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-    if mask is None:
+    if len(points) < 3:
         return 0.0
 
-    # Get contours
-    contours, _ = cv2.findContours(
-        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    if not contours:
-        return 0.0
+    # Raio da Terra em metros
+    R = 6371000
 
-    # Get largest contour
-    largest_contour = max(contours, key=cv2.contourArea)
+    # Fecha o polígono se necessário
+    if points[0] != points[-1]:
+        points = points + [points[0]]
 
-    # Convert to polygon points
-    points = largest_contour.reshape(-1, 2)
+    area = 0.0
+    for i in range(len(points) - 1):
+        lat1, lon1 = points[i]
+        lat2, lon2 = points[i + 1]
 
-    # Convert pixel coordinates to lat/lon
-    lat = metadata["latitude"]
-    lon = metadata["longitude"]
-    zoom = metadata["zoom"]
+        # Converte para radianos
+        lat1, lon1 = math.radians(lat1), math.radians(lon1)
+        lat2, lon2 = math.radians(lat2), math.radians(lon2)
 
-    # Calculate meters per pixel at this zoom level
-    # Reference: https://wiki.openstreetmap.org/wiki/Zoom_levels
-    meters_per_pixel = 156543.03392 * np.cos(lat * np.pi / 180) / (2**zoom)
+        # Fórmula da área de Haversine
+        area += (lon2 - lon1) * (2 + math.sin(lat1) + math.sin(lat2))
 
-    # Create polygon and calculate area
-    polygon = Polygon(points)
-    area_pixels = polygon.area
+    area = abs(area * R * R / 2.0)
+    return area
 
-    # Convert to square meters
-    area_m2 = area_pixels * (meters_per_pixel**2)
 
-    return area_m2
+def calculate_lot_area(doc: dict) -> float:
+    """
+    Calcula a área em metros quadrados do lote baseado na anotação YOLOv8.
+
+    Parameters:
+        doc: dict - Documento JSON contendo a detecção do lote
+
+    Returns:
+        float - Área em metros quadrados
+    """
+    # Obtém os dados necessários do documento
+    metadata = doc.get("metadata", {})
+    center_lat = metadata.get("latitude")
+    center_lon = metadata.get("longitude")
+    zoom = metadata.get("zoom")
+    dimensions = metadata.get("dimensions")
+
+    if not all([center_lat, center_lon, zoom, dimensions]):
+        raise ValueError(
+            "Dados necessários não encontrados no metadata do documento"
+        )
+
+    # Extrai as dimensões da imagem
+    width, height = map(int, dimensions.split("x"))
+
+    # Usa a anotação ajustada se disponível, senão usa a original
+    if "adjusted_detection" in doc:
+        annotation = doc["adjusted_detection"]["annotation"]
+    else:
+        annotation = doc["original_detection"]["annotation"]
+
+    if not annotation:
+        raise ValueError("Nenhuma anotação encontrada no documento")
+
+    # Converte a anotação YOLOv8 em pontos normalizados
+    points_str = annotation.split()[1:]  # Remove o primeiro elemento (classe)
+    points = []
+    for i in range(0, len(points_str), 2):
+        x = float(points_str[i]) * width
+        y = float(points_str[i + 1]) * height
+        points.append((x, y))
+
+    # Converte cada ponto para coordenadas geográficas
+    geo_points = []
+    for pixel_x, pixel_y in points:
+        lat, lon = pixel_to_latlon(
+            pixel_x=pixel_x,
+            pixel_y=pixel_y,
+            center_lat=center_lat,
+            center_lon=center_lon,
+            zoom=zoom,
+            scale=2,  # Scale é sempre 2 para imagens de satélite
+            image_width=width,
+            image_height=height,
+        )
+        geo_points.append((lat, lon))
+
+    # Calcula a área usando a fórmula de Haversine
+    area = calculate_geo_area(geo_points)
+
+    return area
 
 
 def process_lot_areas(
