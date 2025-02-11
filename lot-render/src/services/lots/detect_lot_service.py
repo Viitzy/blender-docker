@@ -97,17 +97,24 @@ async def detect_lot_service(
             "confidence": detection["confidence"],
             "original_detection": detection["original_detection"],
             "original_area_pixels": detection["original_area_pixels"],
+            "metadata": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "dimensions": "1280x1280",
+                "zoom": zoom,
+                "street_name": initial_data["street_name"],
+                "year": initial_data["year"],
+            },
         }
 
         if "adjusted_detection" in detection:
             update_data["adjusted_detection"] = detection["adjusted_detection"]
 
-        await mongo_db.update_detection(doc_id, update_data)
-
         # Get the detected polygon points
         polygon = detection["original_detection"]["polygon"]
         width = height = 1280  # 640x640 with scale=2
 
+        # Converte apenas os pontos do polígono para lat/lon
         points = []
         for x, y in polygon:
             pixel_x = x * width
@@ -124,6 +131,13 @@ async def detect_lot_service(
             )
             points.append({"lat": lat, "lon": lon})
 
+        # Adiciona os pontos do polígono ao update_data
+        update_data["polygon_points"] = points
+
+        # Atualiza MongoDB com todos os dados
+        await mongo_db.update_detection(doc_id, update_data)
+
+        # Retorna apenas os pontos do polígono na resposta
         return {"id": doc_id, "status": "success", "points": points}
 
     except Exception as e:
