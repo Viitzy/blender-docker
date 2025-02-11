@@ -2,7 +2,7 @@ from typing import List, Dict
 import os
 import json
 import traceback
-from blender.blender_execution import run_blender_process
+from .blender.blender_execution import run_blender_process
 
 
 def process_lots_glb(

@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from poligonization import (
+from .poligonization import (
     calculate_polygon_area,
     select_best_polygon_adjustment,
 )

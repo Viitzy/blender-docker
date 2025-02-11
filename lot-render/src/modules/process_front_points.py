@@ -5,11 +5,11 @@ import os
 import traceback
 from pathlib import Path
 import json
-from pixel_to_geo import pixel_to_latlon
+from .pixel_to_geo import pixel_to_latlon
 
 
-from google_roads_circle import process_lot_circle
-from front_view import visualize_lot_front
+from .google_roads_circle import process_lot_circle
+from .front_view import visualize_lot_front
 
 
 def process_single_document(

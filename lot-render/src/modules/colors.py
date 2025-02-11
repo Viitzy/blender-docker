@@ -5,8 +5,8 @@ from typing import Dict, List, Any, Tuple
 import cv2
 import numpy as np
 from PIL import Image
-from pixel_to_geo import pixel_to_latlon
-from lot_colors_adjustment import correct_colors
+from .pixel_to_geo import pixel_to_latlon
+from .lot_colors_adjustment import correct_colors
 import pandas as pd
 import traceback
 
