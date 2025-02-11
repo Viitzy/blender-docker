@@ -66,7 +66,6 @@ async def detect_lot(request: DetectLotRequest):
         zoom=request.zoom,
         confidence=request.confidence,
         object_id=request.object_id,
-        street_name=request.street_name,
         year=request.year,
     )
 
