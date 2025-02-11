@@ -25,104 +25,122 @@ def get_elevations_batch(
     locations: List[Tuple[float, float]], api_key: str
 ) -> List[float]:
     """
-    Get elevations for multiple locations using Google Maps Elevation API.
+    Obtém elevações em lote da API do Google.
 
-    Args:
-        locations: List of (lat, lon) tuples
-        api_key: Google Maps API key
+    Parameters:
+        locations: List[Tuple[float, float]] - Lista de coordenadas (lat, lon)
+        api_key: str - Chave da API do Google
 
     Returns:
-        List of elevations in meters
+        List[float] - Lista de elevações
     """
-    base_url = "https://maps.googleapis.com/maps/api/elevation/json"
+    max_locations_per_request = 100
+    elevations = []
 
-    # Format locations for API
-    locations_str = "|".join(f"{lat},{lon}" for lat, lon in locations)
+    for i in range(0, len(locations), max_locations_per_request):
+        batch = locations[i : i + max_locations_per_request]
+        coordenadas = "|".join([f"{lat},{lon}" for lat, lon in batch])
 
-    params = {"locations": locations_str, "key": api_key}
+        base_url = "https://maps.googleapis.com/maps/api/elevation/json"
+        url = f"{base_url}?locations={coordenadas}&key={api_key}"
 
-    response = requests.get(base_url, params=params)
-    response.raise_for_status()
-    data = response.json()
+        try:
+            response = requests.get(url)
+            print(
+                f"Batch {i//max_locations_per_request + 1}: Status {response.status_code}"
+            )
 
-    if data["status"] != "OK":
-        raise Exception(f"Elevation API error: {data['status']}")
+            if response.status_code == 200:
+                dados = response.json()
+                if dados.get("status") == "OK":
+                    batch_elevations = [
+                        result.get("elevation")
+                        for result in dados.get("results", [])
+                    ]
+                    elevations.extend(batch_elevations)
+                else:
+                    print(f"Erro na API: {dados.get('status')}")
+                    elevations.extend([None] * len(batch))
+            else:
+                print(f"Erro na requisição: {response.status_code}")
+                elevations.extend([None] * len(batch))
 
-    return [result["elevation"] for result in data["results"]]
+            # Pausa para evitar limites de taxa da API
+            time.sleep(0.1)
+
+        except Exception as e:
+            print(f"Erro ao obter elevações: {str(e)}")
+            elevations.extend([None] * len(batch))
+
+    return elevations
 
 
 def get_elevations_with_cache(
-    locations: List[Tuple[float, float]], api_key: str, db_path: str
+    locations: List[Tuple[float, float]],
+    api_key: str,
+    db_path: str = "elevation_cache.db",
 ) -> List[float]:
     """
-    Get elevations with caching.
+    Obtém elevações usando cache local primeiro.
 
-    Args:
-        locations: List of (lat, lon) tuples
-        api_key: Google Maps API key
-        db_path: Path to SQLite cache database
+    Parameters:
+        locations: List[Tuple[float, float]] - Lista de coordenadas (lat, lon)
+        api_key: str - Chave da API do Google
+        db_path: str - Caminho para o banco de dados de cache
 
     Returns:
-        List of elevations in meters
+        List[float] - Lista de elevações
     """
-    # Initialize cache if needed
-    if not os.path.exists(db_path):
-        init_elevation_cache(db_path)
-
-    # Connect to cache
     conn = sqlite3.connect(db_path)
-    c = conn.cursor()
+    cursor = conn.cursor()
 
-    # Check cache for each location
     elevations = []
     locations_to_fetch = []
-    locations_map = {}  # Map original index to new index
+    cached_count = 0
 
-    for i, (lat, lon) in enumerate(locations):
-        c.execute(
-            "SELECT elevation FROM elevations WHERE lat=? AND lon=?", (lat, lon)
+    # Verifica cache para cada localização
+    for lat, lon in locations:
+        cursor.execute(
+            "SELECT elevation FROM elevations WHERE latitude = ? AND longitude = ?",
+            (round(lat, 6), round(lon, 6)),
         )
-        result = c.fetchone()
+        row = cursor.fetchone()
 
-        if result is not None:
-            elevations.append(result[0])
+        if row and row[0] is not None and not np.isnan(row[0]):
+            elevations.append(row[0])
+            cached_count += 1
         else:
-            locations_to_fetch.append((lat, lon))
-            locations_map[len(locations_to_fetch) - 1] = i
             elevations.append(None)
+            locations_to_fetch.append((lat, lon))
 
-    # Fetch missing elevations
+    print(f"Encontrados {cached_count} pontos no cache")
+    print(f"Necessário buscar {len(locations_to_fetch)} novos pontos")
+
+    # Busca elevações não encontradas no cache
     if locations_to_fetch:
-        try:
-            fetched_elevations = get_elevations_batch(
-                locations_to_fetch, api_key
-            )
+        fetched_elevations = get_elevations_batch(locations_to_fetch, api_key)
 
-            # Update cache and results
-            for i, elevation in enumerate(fetched_elevations):
-                orig_index = locations_map[i]
-                lat, lon = locations_to_fetch[i]
+        # Atualiza lista de elevações e cache
+        index = 0
+        for i, elevation in enumerate(elevations):
+            if elevation is None:
+                elevation = fetched_elevations[index]
+                elevations[i] = elevation
+                index += 1
 
-                # Update cache
-                c.execute(
-                    "INSERT OR REPLACE INTO elevations VALUES (?, ?, ?)",
-                    (lat, lon, elevation),
+        # Atualiza cache
+        cursor.executemany(
+            "INSERT OR REPLACE INTO elevations (latitude, longitude, elevation) VALUES (?, ?, ?)",
+            [
+                (round(lat, 6), round(lon, 6), elev)
+                for (lat, lon), elev in zip(
+                    locations_to_fetch, fetched_elevations
                 )
-
-                # Update results
-                elevations[orig_index] = elevation
-
-            conn.commit()
-
-        except Exception as e:
-            print(f"Error fetching elevations: {str(e)}")
-            # Fill missing elevations with None
-            for i in locations_map.values():
-                if elevations[i] is None:
-                    elevations[i] = 0.0
+            ],
+        )
+        conn.commit()
 
     conn.close()
-
     return elevations
 
 
@@ -130,116 +148,112 @@ def process_lots_elevation(
     input_dir: str,
     output_dir: str,
     api_key: str,
-    db_path: str,
+    db_path: str = "elevation_cache.db",
     confidence: float = 0.62,
-) -> List[Dict[str, Any]]:
+) -> List[Dict]:
     """
-    Process lot elevations.
+    Processa elevações para lotes usando arquivos locais.
 
     Args:
-        input_dir: Input directory with color JSONs
-        output_dir: Output directory for elevation results
-        api_key: Google Maps API key
-        db_path: Path to SQLite cache database
-        confidence: Minimum confidence threshold
+        input_dir (str): Diretório contendo os arquivos JSON processados
+        output_dir (str): Diretório para salvar os resultados
+        api_key (str): Chave da API do Google
+        db_path (str): Caminho para o banco de dados de cache
+        confidence (float): Valor mínimo de confiança para processar
 
     Returns:
-        List of processed documents
+        List[Dict]: Lista de documentos processados
     """
-    processed_docs = []
+    # Inicializa cache
+    init_elevation_cache(db_path)
 
-    # Process each color file
-    for filename in os.listdir(input_dir):
-        if not filename.endswith(".json"):
-            continue
+    try:
+        # Cria diretório de saída se não existir
+        os.makedirs(output_dir, exist_ok=True)
 
-        try:
-            # Load document
-            with open(os.path.join(input_dir, filename), "r") as f:
-                doc = json.load(f)
+        # Lista todos os arquivos JSON no diretório de entrada
+        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
+        print(f"\nTotal de arquivos para processar: {len(json_files)}")
 
-            # Get points
-            points = doc["point_colors"]["points"]
-            if not points:
-                continue
+        processed_docs = []
 
-            # Get metadata from original detection
-            orig_doc_path = os.path.join(
-                os.path.dirname(input_dir), "json", filename
-            )
-            with open(orig_doc_path, "r") as f:
-                orig_doc = json.load(f)
+        for i, json_file in enumerate(json_files, 1):
+            try:
+                # Verifica se já existe arquivo processado
+                output_file = os.path.join(output_dir, f"elevation_{json_file}")
+                if os.path.exists(output_file):
+                    print(
+                        f"\nArquivo {output_file} já processado, carregando dados..."
+                    )
+                    with open(output_file, "r") as f:
+                        doc = json.load(f)
+                        processed_docs.append(doc)
+                    continue
 
-            # Check confidence
-            confidence_value = orig_doc["original_detection"]["confidence"]
-            if confidence_value < confidence:
-                continue
+                # Carrega o documento JSON
+                json_path = os.path.join(input_dir, json_file)
+                with open(json_path, "r") as f:
+                    doc = json.load(f)
 
-            # Get image dimensions
-            dimensions = orig_doc["original_detection"]["image_dimensions"]
-            width = dimensions["width"]
-            height = dimensions["height"]
+                # Verifica a confiança
+                confidence_value = doc.get("original_detection", {}).get(
+                    "confidence", 0
+                )
+                if confidence_value < confidence:
+                    print(
+                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
+                    )
+                    continue
 
-            # Get center coordinates
-            lat = orig_doc["metadata"]["latitude"]
-            lon = orig_doc["metadata"]["longitude"]
-            zoom = orig_doc["metadata"]["zoom"]
-
-            # Convert pixel coordinates to lat/lon
-            # Based on Google Maps API tile system
-            # Reference: https://developers.google.com/maps/documentation/javascript/coordinates
-
-            lat_rad = lat * np.pi / 180
-            n = 2.0**zoom
-            world_coord = (
-                n
-                * (1 - (np.log(np.tan(lat_rad) + 1 / np.cos(lat_rad)) / np.pi))
-                / 2
-            )
-
-            pixels_per_lon_degree = width / 360.0
-            pixels_per_lon_radian = width / (2 * np.pi)
-
-            # Convert points to lat/lon
-            locations = []
-            for x, y in points:
-                # Convert to relative coordinates
-                rel_x = (x - width / 2) / width
-                rel_y = (y - height / 2) / height
-
-                # Calculate lat/lon
-                point_lon = lon + (rel_x * 360 / n)
-                mercator_y = world_coord + (rel_y * n)
-                point_lat = np.degrees(
-                    np.arctan(np.sinh(np.pi * (1 - 2 * mercator_y / n)))
+                print(f"\nProcessando documento {i}/{len(json_files)}")
+                print(f"ID: {doc['id']}")
+                print(
+                    f"Rua: {doc.get('metadata', {}).get('street_name', 'N/A')}"
                 )
 
-                locations.append((point_lat, point_lon))
+                # Verifica se tem pontos lat/lon
+                points_lat_lon = doc.get("point_colors", {}).get(
+                    "points_lat_lon"
+                )
+                if not points_lat_lon:
+                    print("Pontos lat/lon não encontrados, pulando...")
+                    continue
 
-            # Get elevations
-            elevations = get_elevations_with_cache(locations, api_key, db_path)
+                print(f"Total de pontos para elevação: {len(points_lat_lon)}")
 
-            # Create elevation document
-            elevation_doc = {
-                "id": doc["id"],
-                "point_colors": doc["point_colors"].copy(),
-            }
+                # Obtém elevações
+                elevations = get_elevations_with_cache(
+                    points_lat_lon, api_key, db_path
+                )
 
-            # Add lat/lon/elevation to points
-            elevation_doc["point_colors"]["lat_lon_elevation"] = [
-                [lat, lon, elev]
-                for (lat, lon), elev in zip(locations, elevations)
-            ]
+                # Atualiza documento
+                if "point_colors" not in doc:
+                    doc["point_colors"] = {}
+                doc["point_colors"]["lat_lon_elevation"] = elevations
 
-            # Save document
-            output_path = os.path.join(output_dir, filename)
-            with open(output_path, "w") as f:
-                json.dump(elevation_doc, f, indent=2)
+                # Salva o documento processado
+                with open(output_file, "w") as f:
+                    json.dump(doc, f, indent=2)
 
-            processed_docs.append(elevation_doc)
+                processed_docs.append(doc)
+                print(f"Documento processado e salvo com sucesso!")
+                print(
+                    f"Elevações: min={min(elevations):.1f}m, max={max(elevations):.1f}m"
+                )
 
-        except Exception as e:
-            print(f"Error processing {filename}: {str(e)}")
-            continue
+            except Exception as e:
+                print(f"Erro ao processar arquivo {json_file}: {str(e)}")
+                traceback.print_exc()
+                continue
 
-    return processed_docs
+        print("\n=== Resumo do processamento ===")
+        print(f"Total de documentos: {len(json_files)}")
+        print(f"Processados com sucesso: {len(processed_docs)}")
+        print(f"Cache utilizado: {db_path}")
+        print("==============================\n")
+
+        return processed_docs
+
+    except Exception as e:
+        print(f"Erro durante o processamento: {str(e)}")
+        raise

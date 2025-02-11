@@ -91,103 +91,173 @@ def draw_segment_with_watermark(
     return result
 
 
+def yolov8_annotation_to_contours(annotation: str, image_shape: tuple) -> list:
+    """
+    Converte uma string de anotação YOLOv8 em contornos OpenCV.
+
+    Parameters:
+        annotation: str - String de anotação YOLOv8
+        image_shape: tuple - (height, width) da imagem
+
+    Returns:
+        list - Lista de contornos no formato OpenCV
+    """
+    # Divide a string em valores
+    values = annotation.strip().split()
+
+    # Remove o class_id (primeiro valor)
+    coordinates = values[1:]
+
+    # Converte para float e reshape para pares (x,y)
+    points = np.array([float(x) for x in coordinates]).reshape(-1, 2)
+
+    # Desnormaliza as coordenadas
+    height, width = image_shape
+    points[:, 0] *= width
+    points[:, 1] *= height
+
+    # Converte para inteiros
+    points = points.astype(np.int32)
+
+    return [points]
+
+
 def process_lot_images_for_site(
     input_dir: str,
     output_dir: str,
-    hex_color: str = "#e8f34e",
-    watermark_path: str = None,
+    hex_color: str,
+    watermark_path: str,
     confidence: float = 0.62,
-) -> List[Dict[str, Any]]:
+) -> list:
     """
-    Process lot images for website display.
+    Processa imagens de lotes para exibição no site usando arquivos locais.
 
     Args:
-        input_dir: Input directory with processed JSONs
-        output_dir: Output directory for site images
-        hex_color: Hex color for segments
-        watermark_path: Path to watermark image
-        confidence: Minimum confidence threshold
+        input_dir (str): Diretório contendo os arquivos JSON de detecção
+        output_dir (str): Diretório para salvar as imagens processadas
+        hex_color (str): Cor em hexadecimal para a máscara
+        watermark_path (str): Caminho para a imagem de marca d'água
+        confidence (float): Valor mínimo de confiança para processar o documento (default: 0.62)
 
     Returns:
-        List of processed documents
+        list: Lista de documentos processados
     """
-    processed_docs = []
+    print(f"\nIniciando processamento de imagens para o site")
+    print(f"Diretório de entrada: {input_dir}")
+    print(f"Filtro de confiança: >= {confidence}")
 
-    # Process each detection file
-    for filename in os.listdir(input_dir):
-        if not filename.endswith(".json"):
-            continue
+    try:
+        # Cria diretório de saída se não existir
+        os.makedirs(output_dir, exist_ok=True)
 
-        try:
-            # Load document
-            with open(os.path.join(input_dir, filename), "r") as f:
-                doc = json.load(f)
+        # Lista todos os arquivos JSON no diretório de entrada
+        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
+        print(f"Encontrados {len(json_files)} arquivos JSON para processar")
 
-            # Check confidence
-            confidence_value = doc["original_detection"]["confidence"]
-            if confidence_value < confidence:
+        if not json_files:
+            print(f"Nenhum arquivo encontrado para processar")
+            return []
+
+        processed_docs = []
+
+        for json_file in json_files:
+            try:
+                json_path = os.path.join(input_dir, json_file)
+                print(f"\nProcessando arquivo: {json_file}")
+
+                # Carrega o documento JSON
+                with open(json_path, "r") as f:
+                    doc = json.load(f)
+
+                # Verifica a confiança
+                confidence_value = doc.get("original_detection", {}).get(
+                    "confidence", 0
+                )
+                if confidence_value < confidence:
+                    print(
+                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
+                    )
+                    continue
+
+                # Obtém o caminho da imagem original
+                image_path = doc.get("metadata", {}).get("original_image")
+                if not image_path or not os.path.exists(image_path):
+                    print(f"Imagem original não encontrada: {image_path}")
+                    continue
+
+                # Carrega e verifica a imagem original
+                image = cv2.imread(image_path)
+                if image is None:
+                    print(f"Falha ao carregar a imagem")
+                    continue
+
+                print(f"Dimensões da imagem original: {image.shape}")
+
+                # Redimensiona para 1280x1280 se necessário
+                if image.shape[:2] != (1280, 1280):
+                    print(f"Redimensionando imagem para 1280x1280")
+                    image = cv2.resize(
+                        image, (1280, 1280), interpolation=cv2.INTER_LANCZOS4
+                    )
+
+                # Prepara o contorno usando a anotação ajustada se disponível
+                mask_annotation = doc.get("adjusted_detection", {}).get(
+                    "annotation"
+                ) or doc.get("original_detection", {}).get("annotation")
+
+                if not mask_annotation:
+                    print(f"Nenhuma anotação de máscara encontrada")
+                    continue
+
+                # Converte anotação em contornos
+                contours = yolov8_annotation_to_contours(
+                    mask_annotation, image.shape[:2]
+                )
+                print(
+                    f"Contornos gerados com shape da imagem: {image.shape[:2]}"
+                )
+
+                # Aplica máscara e marca d'água
+                processed_image = draw_segment_with_watermark(
+                    image=image,
+                    contours=contours,
+                    hex_color=hex_color,
+                    watermark_path=watermark_path,
+                )
+
+                # Gera nome do arquivo de saída
+                output_filename = f"site_{os.path.splitext(json_file)[0]}.jpg"
+                output_path = os.path.join(output_dir, output_filename)
+
+                # Salva a imagem processada com alta qualidade
+                encode_params = [
+                    cv2.IMWRITE_JPEG_QUALITY,
+                    95,
+                    cv2.IMWRITE_JPEG_OPTIMIZE,
+                    1,
+                ]
+                cv2.imwrite(output_path, processed_image, encode_params)
+
+                processed_docs.append(
+                    {
+                        "object_id": doc.get("id"),
+                        "site_image_path": output_path,
+                        "original_image": image_path,
+                        "confidence": confidence_value,
+                    }
+                )
+
+                print(f"Imagem processada salva em: {output_path}")
+
+            except Exception as e:
+                print(f"Erro ao processar arquivo {json_file}: {str(e)}")
                 continue
 
-            # Get original image path from detection result path
-            result_path = Path(doc["original_detection"]["result_path"])
-            # Extract coordinates from the ID
-            coords = doc["id"].split("_")[1:]  # This will get both lat and lng
-            image_name = f"satellite_{coords[0]}_{coords[1]}.jpg"
-            # Look for image in the satellite images directory
-            image_path = (
-                result_path.parent.parent / "satellite_images" / image_name
-            )
+        print(
+            f"\nProcessamento finalizado. {len(processed_docs)} documentos processados"
+        )
+        return processed_docs
 
-            print(f"Looking for image at: {image_path}")  # Debug print
-
-            # Load image
-            image = cv2.imread(str(image_path))
-            if image is None:
-                print(f"Error loading image: {image_path}")
-                continue
-
-            # Get mask
-            if "adjusted_detection" in doc:
-                mask_path = doc["adjusted_detection"]["mask_path"]
-            else:
-                mask_path = doc["original_detection"]["mask_path"]
-
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                print(f"Error loading mask: {mask_path}")
-                continue
-
-            # Get contours
-            contours, _ = cv2.findContours(
-                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-            if not contours:
-                continue
-
-            # Draw segment with watermark
-            result = draw_segment_with_watermark(
-                image=image,
-                contours=contours,
-                hex_color=hex_color,
-                watermark_path=watermark_path,
-            )
-
-            # Save result
-            output_filename = f"site_{doc['id']}.jpg"
-            output_path = os.path.join(output_dir, output_filename)
-            cv2.imwrite(output_path, result)
-
-            # Update document
-            site_doc = {
-                "object_id": doc["id"],
-                "site_image_path": output_path,
-                "confidence": confidence_value,
-            }
-
-            processed_docs.append(site_doc)
-
-        except Exception as e:
-            print(f"Error processing {filename}: {str(e)}")
-            continue
-
-    return processed_docs
+    except Exception as e:
+        print(f"Erro durante o processamento: {str(e)}")
+        raise

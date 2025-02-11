@@ -5,138 +5,258 @@ from typing import List, Dict, Any, Optional
 import cv2
 import numpy as np
 from ultralytics import YOLO
+from poligonization import (
+    calculate_polygon_area,
+    select_best_polygon_adjustment,
+)
+
+
+def load_yolo_model(model_path: str):
+    """
+    Carrega o modelo YOLO (ultralytics).
+    """
+    model = YOLO(model_path)  # ex.: YOLO("caminho/para/best.pt")
+    return model
+
+
+def get_best_segmentation(
+    model,
+    img_512,
+    mask_save_dir=None,
+    mask_filename=None,
+):
+    """
+    Realiza a detecção e retorna a melhor segmentação.
+    """
+    try:
+        # Realiza a detecção
+        results = model(img_512, verbose=True)
+
+        if len(results) == 0 or len(results[0].masks) == 0:
+            return None
+
+        # Pega a primeira detecção (assumindo que é a melhor)
+        result = results[0]
+
+        # Extrai dados da máscara
+        mask_data = result.masks[0]
+        points = mask_data.xy[0]  # Pega apenas os pontos do primeiro polígono
+        confidence = float(result.boxes[0].conf)
+        class_id = int(result.boxes[0].cls)
+
+        # Normaliza os pontos para o intervalo [0,1]
+        normalized_points = points / 512  # Assumindo imagem 512x512
+
+        # Se diretório de máscaras foi especificado, salva a máscara
+        if mask_save_dir and mask_filename:
+            mask_path = os.path.join(mask_save_dir, mask_filename)
+            mask = (
+                mask_data.data[0].cpu().numpy()
+            )  # Pega apenas a primeira máscara
+            mask = (mask * 255).astype(np.uint8)
+            cv2.imwrite(mask_path, mask)
+
+        return {
+            "polygon": normalized_points,
+            "confidence": confidence,
+            "class_id": class_id,
+        }
+
+    except Exception as e:
+        print(f"Erro na segmentação: {str(e)}")
+        return None
+
+
+def polygon_to_yolov8_mask_str(class_id: int, polygon: np.ndarray) -> str:
+    """
+    Converte um array (N, 2) [x, y], normalizado (0..1), para a
+    string de anotação YOLOv8 no estilo:
+
+    'classe x0 y0 x1 y1 x2 y2 ... xN yN'
+
+    Exemplo (classe = 0):
+    0 0.84765625 0.42578125 0.8125 0.228515625 ...
+
+    polygon: np.ndarray com shape (N, 2)
+    """
+    # Inicia com a classe
+    mask_str_list = [str(class_id)]
+
+    # Adiciona as coordenadas x0,y0, x1,y1, ... xN,yN
+    # Convertendo para string com alguma precisão.
+    # Fique à vontade para ajustar a precisão (ex.: {:.6f})
+    for x, y in polygon:
+        mask_str_list.append(f"{x:.8f}")
+        mask_str_list.append(f"{y:.8f}")
+
+    # Retorna uma string única
+    return " ".join(mask_str_list)
 
 
 def detect_lots_and_save(
     model_path: str,
-    items_list: List[Dict[str, Any]],
+    items_list: list,
     output_dir: str,
     adjust_mask: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list:
     """
-    Detect lots in images and save results.
+    Detecta lotes nas imagens e salva resultados em disco.
 
     Args:
-        model_path: Path to YOLO model
-        items_list: List of items to process
-        output_dir: Output directory
-        adjust_mask: Whether to adjust masks
+        model_path: Caminho para o modelo YOLO
+        items_list: Lista de itens com imagens para processar
+        output_dir: Diretório base para salvar resultados
+        adjust_mask: Se True, aplica ajuste de máscara
 
     Returns:
-        List of processed documents
+        list: Lista de resultados processados
     """
-    # Load YOLO model
-    model = YOLO(model_path)
+    processed_results = []
 
-    processed_docs = []
+    try:
+        # Carrega o modelo YOLO apenas se necessário
+        model = None
 
-    for item in items_list:
-        try:
-            # Load and resize image
-            image_path = item["image_path"]
-            print(
-                f"\nDetection - Input image path: {image_path}"
-            )  # Debug print
-            print(f"Detection - Output directory: {output_dir}")  # Debug print
+        # Cria diretórios de saída
+        results_dir = os.path.join(output_dir, "detections")
+        masks_dir = os.path.join(output_dir, "masks")
+        json_dir = os.path.join(output_dir, "json")
 
-            image = cv2.imread(image_path)
-            if image is None:
-                print(
-                    f"Detection - Error: Could not load image at {image_path}"
-                )
-                continue
+        for directory in [results_dir, masks_dir, json_dir]:
+            os.makedirs(directory, exist_ok=True)
 
-            # Get image dimensions
-            height, width = image.shape[:2]
-            print(
-                f"Detection - Image dimensions: {width}x{height}"
-            )  # Debug print
+        for item in items_list:
+            try:
+                item_id = item["object_id"]
 
-            # Run detection
-            results = model(image)[0]
+                # Verifica se os arquivos já existem
+                mask_path = os.path.join(masks_dir, f"mask_{item_id}.png")
+                json_path = os.path.join(json_dir, f"{item_id}.json")
+                result_path = os.path.join(results_dir, f"{item_id}.png")
 
-            # Process detections
-            for i, detection in enumerate(results.boxes.data):
-                confidence = float(detection[4])
-                print(
-                    f"Detection - Found lot {i} with confidence: {confidence}"
-                )  # Debug print
+                # Se todos os arquivos existem, carrega os resultados existentes
+                if all(
+                    [
+                        os.path.exists(p)
+                        for p in [mask_path, json_path, result_path]
+                    ]
+                ):
+                    print(f"\nArquivos existentes encontrados para {item_id}")
+                    print(f"Carregando resultados de: {json_path}")
 
-                # Get mask
-                if len(results.masks) > i:
-                    mask = results.masks[i].data[0].cpu().numpy()
-                    mask = (mask > 0.5).astype(np.uint8) * 255
-                else:
+                    with open(json_path, "r") as f:
+                        result = json.load(f)
+                    processed_results.append(result)
                     continue
 
-                # Adjust mask if requested
-                if adjust_mask:
-                    kernel = np.ones((5, 5), np.uint8)
-                    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-                    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+                # Se chegou aqui, precisa processar
+                # Carrega o modelo YOLO se ainda não carregou
+                if model is None:
+                    print("Carregando modelo YOLO...")
+                    model = load_yolo_model(model_path)
 
-                # Save results
-                doc_id = f"{item['object_id']}_{i}"
+                # Carrega a imagem local
+                image_path = item["image_path"]
+                if not os.path.exists(image_path):
+                    print(f"Imagem não encontrada: {image_path}")
+                    continue
 
-                # Save mask
-                mask_filename = f"mask_{doc_id}.png"
-                mask_path = os.path.join(output_dir, "masks", mask_filename)
-                print(f"Detection - Saving mask to: {mask_path}")  # Debug print
-                cv2.imwrite(mask_path, mask)
+                # Lê e redimensiona a imagem
+                img = cv2.imread(image_path)
+                if img is None:
+                    print(f"Erro ao ler imagem: {image_path}")
+                    continue
 
-                # Save detection visualization
-                result_image = image.copy()
-                contours, _ = cv2.findContours(
-                    mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                img_512 = cv2.resize(
+                    img, (512, 512), interpolation=cv2.INTER_AREA
                 )
-                cv2.drawContours(result_image, contours, -1, (0, 255, 0), 2)
 
-                result_filename = f"detection_{doc_id}.png"
-                result_path = os.path.join(
-                    output_dir, "detections", result_filename
+                # Realiza a detecção
+                seg_data = get_best_segmentation(
+                    model,
+                    img_512,
+                    mask_save_dir=masks_dir,
+                    mask_filename=f"mask_{item_id}.png",
                 )
-                print(
-                    f"Detection - Saving result to: {result_path}"
-                )  # Debug print
-                cv2.imwrite(result_path, result_image)
 
-                # Create document
-                doc = {
-                    "id": doc_id,
+                if seg_data is None:
+                    print(f"Nenhuma detecção encontrada para item {item_id}")
+                    continue
+
+                # Prepara resultado base
+                result = {
+                    "id": item_id,
                     "original_detection": {
-                        "confidence": confidence,
-                        "mask_path": mask_path,
-                        "result_path": result_path,
-                        "image_dimensions": {"width": width, "height": height},
+                        "polygon": seg_data["polygon"].tolist(),
+                        "confidence": seg_data["confidence"],
+                        "annotation": polygon_to_yolov8_mask_str(
+                            seg_data["class_id"], seg_data["polygon"]
+                        ),
                     },
                     "metadata": {
                         "latitude": item["latitude"],
                         "longitude": item["longitude"],
+                        "dimensions": item["dimensions"],
                         "zoom": item["zoom"],
-                        "year": item["year"],
+                        "street_name": item.get("street_name", ""),
+                        "google_place_id": item.get("google_place_id", ""),
+                        "year": item.get("year", ""),
+                        "original_image": image_path,
                     },
                 }
 
+                # Se adjust_mask=True, processa ajuste
                 if adjust_mask:
-                    doc["adjusted_detection"] = {
-                        "adjustment_method": "morphological",
-                        "mask_path": mask_path,
-                    }
+                    adjusted_polygon, adjustment_method = (
+                        select_best_polygon_adjustment(
+                            seg_data,
+                            calculate_polygon_area(seg_data["polygon"]),
+                            size=(512, 512),
+                        )
+                    )
 
-                # Save JSON
-                json_filename = f"detection_{doc_id}.json"
-                json_path = os.path.join(output_dir, "json", json_filename)
-                print(f"Detection - Saving JSON to: {json_path}")  # Debug print
+                    if adjusted_polygon is not None:
+                        result["adjusted_detection"] = {
+                            "polygon": adjusted_polygon.tolist(),
+                            "adjustment_method": adjustment_method,
+                            "annotation": polygon_to_yolov8_mask_str(
+                                seg_data["class_id"], adjusted_polygon
+                            ),
+                        }
 
+                # Salva resultado em JSON
                 with open(json_path, "w") as f:
-                    json.dump(doc, f, indent=2)
+                    json.dump(result, f, indent=2)
 
-                processed_docs.append(doc)
+                # Salva imagem original com máscaras
+                result_img = img_512.copy()
 
-        except Exception as e:
-            print(
-                f"Detection - Error processing {item['image_path']}: {str(e)}"
-            )
-            continue
+                # Desenha máscara original (verde)
+                points = (seg_data["polygon"] * 512).astype(np.int32)
+                cv2.fillPoly(result_img, [points], (0, 255, 0))
 
-    return processed_docs
+                # Desenha máscara ajustada se existir (azul)
+                if adjust_mask and "adjusted_detection" in result:
+                    adj_points = (adjusted_polygon * 512).astype(np.int32)
+                    cv2.fillPoly(result_img, [adj_points], (255, 0, 0))
+
+                # Salva imagem com máscaras
+                cv2.imwrite(result_path, result_img)
+
+                print(f"Processado item {item_id}")
+                print(f"Resultados salvos em:")
+                print(f"- JSON: {json_path}")
+                print(f"- Máscara: {mask_path}")
+                print(f"- Imagem: {result_path}")
+
+                processed_results.append(result)
+
+            except Exception as e:
+                print(f"Erro processando item: {str(e)}")
+                continue
+
+        return processed_results
+
+    except Exception as e:
+        print(f"Erro durante o processamento: {str(e)}")
+        return []

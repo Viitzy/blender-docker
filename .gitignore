@@ -6,3 +6,5 @@ lot-render/.env
 .DS_Store
 lot_generation/
 lot-render/models/best.pt
+lot-render/not_used
+lot-render/src/modules/blender

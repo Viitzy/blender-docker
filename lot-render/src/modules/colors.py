@@ -5,6 +5,48 @@ from typing import Dict, List, Any, Tuple
 import cv2
 import numpy as np
 from PIL import Image
+from pixel_to_geo import pixel_to_latlon
+from lot_colors_adjustment import correct_colors
+import pandas as pd
+import traceback
+
+
+def save_visualizations(
+    image,
+    polygon_points,
+    points_inside,
+    colors_rgb,
+    df_corrected,
+    doc_id,
+    output_folder,
+):
+    """Helper function para salvar visualizações"""
+    # Visualização original
+    vis_image = image.copy()
+    cv2.polylines(vis_image, [np.array(polygon_points)], True, (0, 255, 0), 2)
+    for i, (x, y) in enumerate(points_inside):
+        r, g, b = colors_rgb[i]
+        cv2.circle(vis_image, (x, y), 3, (b, g, r), -1)
+
+    # Visualização com cores corrigidas
+    vis_image_corrected = image.copy()
+    cv2.polylines(
+        vis_image_corrected, [np.array(polygon_points)], True, (0, 255, 0), 2
+    )
+    for i, (x, y) in enumerate(points_inside):
+        r = int(df_corrected.iloc[i]["r"])
+        g = int(df_corrected.iloc[i]["g"])
+        b = int(df_corrected.iloc[i]["b"])
+        cv2.circle(vis_image_corrected, (x, y), 3, (b, g, r), -1)
+
+    os.makedirs(output_folder, exist_ok=True)
+    cv2.imwrite(
+        os.path.join(output_folder, f"{doc_id}_points_original.jpg"), vis_image
+    )
+    cv2.imwrite(
+        os.path.join(output_folder, f"{doc_id}_points_corrected.jpg"),
+        vis_image_corrected,
+    )
 
 
 def compute_number_of_points(area_m2: float) -> int:
@@ -84,121 +126,231 @@ def process_lot_colors(
     dark_threshold: int = 70,
     bright_threshold: int = 215,
     confidence: float = 0.62,
-) -> List[Dict[str, Any]]:
+) -> list:
     """
-    Process lot colors from satellite images.
+    Processa as cores dos lotes usando arquivos locais, adiciona coordenadas geográficas
+    e corrige cores escuras e claras.
 
     Args:
-        input_dir: Input directory with processed JSONs
-        output_dir: Output directory for color results
-        max_points: Maximum number of points to sample
-        dark_threshold: Threshold for dark colors
-        bright_threshold: Threshold for bright colors
-        confidence: Minimum confidence threshold
+        input_dir (str): Diretório contendo os arquivos JSON processados
+        output_dir (str): Pasta para salvar visualizações
+        max_points (int): Número máximo de pontos por lote
+        dark_threshold (int): Limite para cores escuras
+        bright_threshold (int): Limite para cores claras
+        confidence (float): Valor mínimo de confiança para processar o documento
 
     Returns:
-        List of processed documents
+        list: Lista de documentos processados
     """
-    processed_docs = []
+    print("\n=== Iniciando processamento de cores dos lotes ===")
+    print(f"Parâmetros:")
+    print(f"- Máximo de pontos: {max_points}")
+    print(f"- Threshold escuro: {dark_threshold}")
+    print(f"- Threshold claro: {bright_threshold}")
+    print(f"- Filtro de confiança: >= {confidence}")
 
-    # Process each detection file
-    for filename in os.listdir(input_dir):
-        if not filename.endswith(".json"):
-            continue
+    try:
+        # Cria diretório de saída se não existir
+        os.makedirs(output_dir, exist_ok=True)
 
-        try:
-            # Load document
-            with open(os.path.join(input_dir, filename), "r") as f:
-                doc = json.load(f)
+        # Lista todos os arquivos JSON no diretório de entrada
+        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
+        total_docs = len(json_files)
+        print(f"\nTotal de documentos para processar: {total_docs}")
 
-            # Check confidence
-            confidence_value = doc["original_detection"]["confidence"]
-            if confidence_value < confidence:
-                continue
+        processed_docs = []
+        processed = 0
+        errors = 0
 
-            # Get area
-            area_m2 = doc.get("area_m2", 0)
-            if area_m2 <= 0:
-                continue
+        for json_file in json_files:
+            try:
+                # Carrega o documento JSON
+                json_path = os.path.join(input_dir, json_file)
+                with open(json_path, "r") as f:
+                    doc = json.load(f)
 
-            # Get original image path
-            result_path = Path(doc["original_detection"]["result_path"])
-            # Extract coordinates from the ID
-            coords = doc["id"].split("_")[1:]  # This will get both lat and lng
-            image_name = f"satellite_{coords[0]}_{coords[1]}.jpg"
-            # Look for image in the satellite images directory
-            image_path = (
-                result_path.parent.parent / "satellite_images" / image_name
-            )
+                # Verifica a confiança
+                confidence_value = doc.get("original_detection", {}).get(
+                    "confidence", 0
+                )
+                if confidence_value < confidence:
+                    print(
+                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
+                    )
+                    continue
 
-            print(f"Looking for image at: {image_path}")  # Debug print
+                processed += 1
+                print(
+                    f"\n--- Processando documento {processed}/{total_docs} ---"
+                )
+                print(f"ID: {doc['id']}")
+                print(
+                    f"Street: {doc.get('metadata', {}).get('street_name', 'N/A')}"
+                )
 
-            # Load image
-            image = cv2.imread(str(image_path))
-            if image is None:
-                print(f"Error loading image: {image_path}")
-                continue
+                # Carrega a imagem original
+                image_path = doc.get("metadata", {}).get("original_image")
+                if not image_path or not os.path.exists(image_path):
+                    print(f"Imagem original não encontrada: {image_path}")
+                    errors += 1
+                    continue
 
-            # Get mask
-            if "adjusted_detection" in doc:
-                mask_path = doc["adjusted_detection"]["mask_path"]
-            else:
-                mask_path = doc["original_detection"]["mask_path"]
+                image = cv2.imread(image_path)
+                if image is None:
+                    print("Erro ao carregar imagem, pulando documento")
+                    errors += 1
+                    continue
 
-            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask is None:
-                print(f"Error loading mask: {mask_path}")
-                continue
+                height, width = image.shape[:2]
+                print(f"Dimensões da imagem: {width}x{height}")
 
-            # Get points inside mask
-            points = get_points_inside_mask(mask, area_m2, max_points)
-            if not points:
-                continue
+                # Usa a área já calculada ou calcula se necessário
+                area = doc.get("area_m2")
+                if area is None:
+                    print("Área não encontrada no documento")
+                    errors += 1
+                    continue
 
-            # Get colors at points
-            colors = []
-            colors_adjusted = []
+                print(f"Área do lote: {area:.2f} m²")
 
-            for x, y in points:
-                # Get BGR color
-                bgr_color = image[y, x].tolist()
-                # Convert to RGB
-                rgb_color = bgr_color[::-1]
+                # Cria máscara do polígono
+                print("Gerando máscara do polígono...")
+                mask = np.zeros((height, width), dtype=np.uint8)
+                annotation = doc.get("adjusted_detection", {}).get(
+                    "annotation"
+                ) or doc.get("original_detection", {}).get("annotation")
 
-                # Adjust color if too dark or bright
-                adjusted = rgb_color.copy()
-                for i in range(3):
-                    if adjusted[i] < dark_threshold:
-                        adjusted[i] = dark_threshold
-                    elif adjusted[i] > bright_threshold:
-                        adjusted[i] = bright_threshold
+                if not annotation:
+                    print("Anotação não encontrada")
+                    errors += 1
+                    continue
 
-                # Convert to hex
-                hex_color = rgb_to_hex(tuple(rgb_color))
-                hex_color_adjusted = rgb_to_hex(tuple(adjusted))
+                points = annotation.split()[1:]
+                polygon_points = []
 
-                colors.append(hex_color)
-                colors_adjusted.append(hex_color_adjusted)
+                for i in range(0, len(points), 2):
+                    x = float(points[i]) * width
+                    y = float(points[i + 1]) * height
+                    polygon_points.append([int(x), int(y)])
 
-            # Create color document
-            color_doc = {
-                "id": doc["id"],
-                "point_colors": {
-                    "points": [(int(x), int(y)) for x, y in points],
+                cv2.fillPoly(mask, [np.array(polygon_points)], 1)
+
+                # Gera pontos internos
+                print("Gerando pontos internos...")
+                points_inside = get_points_inside_mask(mask, area)
+                print(f"Pontos gerados: {len(points_inside)}")
+
+                # Processa cores e coordenadas
+                print("Processando cores e coordenadas...")
+                colors = []
+                colors_rgb = []
+                normalized_points = []
+                geo_points = []
+
+                metadata = doc.get("metadata", {})
+                center_lat = metadata.get("latitude")
+                center_lon = metadata.get("longitude")
+                zoom = metadata.get("zoom", 20)
+
+                for x, y in points_inside:
+                    # Processa cores
+                    bgr_color = image[y, x]
+                    rgb_color = (
+                        int(bgr_color[2]),
+                        int(bgr_color[1]),
+                        int(bgr_color[0]),
+                    )
+                    hex_color = rgb_to_hex(rgb_color)
+                    colors.append(hex_color)
+                    colors_rgb.append(rgb_color)
+
+                    # Normaliza pontos
+                    normalized_points.append(
+                        [
+                            round(float(x) / width, 3),
+                            round(float(y) / height, 3),
+                        ]
+                    )
+
+                    # Calcula coordenadas geográficas
+                    lat, lon = pixel_to_latlon(
+                        pixel_x=x,
+                        pixel_y=y,
+                        center_lat=center_lat,
+                        center_lon=center_lon,
+                        zoom=zoom,
+                        scale=2,
+                        image_width=width,
+                        image_height=height,
+                    )
+                    geo_points.append([round(lat, 6), round(lon, 6)])
+
+                # Correção de cores
+                print("Aplicando correção de cores...")
+                df_colors = pd.DataFrame(colors_rgb, columns=["r", "g", "b"])
+                df_colors["x"] = [p[0] for p in normalized_points]
+                df_colors["y"] = [p[1] for p in normalized_points]
+                df_colors["z"] = 0
+
+                df_corrected = correct_colors(
+                    df_colors,
+                    dark_threshold=dark_threshold,
+                    bright_threshold=bright_threshold,
+                )
+
+                colors_adjusted = []
+                for _, row in df_corrected.iterrows():
+                    rgb = (int(row["r"]), int(row["g"]), int(row["b"]))
+                    hex_color = rgb_to_hex(rgb)
+                    colors_adjusted.append(hex_color)
+
+                # Salva visualizações
+                print("Salvando visualizações...")
+                save_visualizations(
+                    image,
+                    polygon_points,
+                    points_inside,
+                    colors_rgb,
+                    df_corrected,
+                    doc["id"],
+                    output_dir,
+                )
+
+                # Prepara dados de cores para salvar
+                point_colors = {
+                    "points": normalized_points,
                     "colors": colors,
                     "colors_adjusted": colors_adjusted,
-                },
-            }
+                    "points_lat_lon": geo_points,
+                }
 
-            # Save document
-            output_path = os.path.join(output_dir, filename)
-            with open(output_path, "w") as f:
-                json.dump(color_doc, f, indent=2)
+                # Atualiza o documento com as cores processadas
+                doc["point_colors"] = point_colors
 
-            processed_docs.append(color_doc)
+                # Salva o documento atualizado
+                output_json_path = os.path.join(
+                    output_dir, f"colors_{doc['id']}.json"
+                )
+                with open(output_json_path, "w") as f:
+                    json.dump(doc, f, indent=2)
 
-        except Exception as e:
-            print(f"Error processing {filename}: {str(e)}")
-            continue
+                processed_docs.append(doc)
+                print("Documento processado e salvo com sucesso!")
 
-    return processed_docs
+            except Exception as e:
+                errors += 1
+                print(f"\nERRO ao processar arquivo {json_file}: {str(e)}")
+                traceback.print_exc()
+                continue
+
+        print("\n=== Resumo do processamento ===")
+        print(f"Total de documentos: {total_docs}")
+        print(f"Processados com sucesso: {len(processed_docs)}")
+        print(f"Erros: {errors}")
+        print("==============================\n")
+
+        return processed_docs
+
+    except Exception as e:
+        print(f"Erro durante o processamento: {str(e)}")
+        raise

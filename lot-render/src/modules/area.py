@@ -57,77 +57,120 @@ def calculate_lot_area(mask_path: str, metadata: Dict) -> float:
 
 def process_lot_areas(
     input_dir: str, output_dir: str, confidence_threshold: float = 0.62
-) -> Dict[str, Any]:
+) -> Dict:
     """
-    Process lot areas from detection results.
+    Processa e calcula as áreas dos lotes a partir dos arquivos JSON salvos.
 
     Args:
-        input_dir: Input directory with detection JSONs
-        output_dir: Output directory for processed results
-        confidence_threshold: Minimum confidence threshold
+        input_dir: Diretório contendo os arquivos JSON das detecções
+        output_dir: Diretório para salvar os resultados processados
+        confidence_threshold: Valor mínimo de confiança para processar
 
     Returns:
-        Statistics about the processing
+        Dict: Estatísticas do processamento
     """
-    stats = {
-        "total_processed": 0,
-        "successful": 0,
-        "failed": 0,
-        "total_area": 0.0,
-        "average_area": 0.0,
-    }
+    print(f"\n=== Processando áreas dos lotes ===")
+    print(f"Diretório de entrada: {input_dir}")
+    print(f"Filtro de confiança: >= {confidence_threshold}")
 
-    # Process each detection file
-    for filename in os.listdir(input_dir):
-        if not filename.endswith(".json"):
-            continue
+    try:
+        # Cria diretório de saída se não existir
+        os.makedirs(output_dir, exist_ok=True)
 
-        input_path = os.path.join(input_dir, filename)
-        output_path = os.path.join(output_dir, filename)
+        # Lista todos os arquivos JSON no diretório de entrada
+        json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
+        total_files = len(json_files)
 
-        try:
-            # Load detection
-            with open(input_path, "r") as f:
-                doc = json.load(f)
+        print(f"Total de arquivos para processar: {total_files}")
 
-            stats["total_processed"] += 1
+        processed = 0
+        success = 0
+        errors = 0
+        areas = []
 
-            # Check confidence
-            confidence = doc["original_detection"]["confidence"]
-            if confidence < confidence_threshold:
-                stats["failed"] += 1
+        for json_file in json_files:
+            try:
+                json_path = os.path.join(input_dir, json_file)
+
+                # Carrega o arquivo JSON
+                with open(json_path, "r") as f:
+                    doc = json.load(f)
+
+                # Verifica a confiança
+                confidence = doc.get("original_detection", {}).get(
+                    "confidence", 0
+                )
+                if confidence < confidence_threshold:
+                    print(
+                        f"\nArquivo {json_file} abaixo do limiar de confiança, pulando..."
+                    )
+                    continue
+
+                processed += 1
+                print(f"\nProcessando arquivo {processed}/{total_files}")
+                print(f"ID: {doc.get('id', 'N/A')}")
+
+                try:
+                    # Calcula a área
+                    area = calculate_lot_area(doc)
+                    print(f"Área calculada: {area:.2f} m²")
+
+                    # Adiciona a área ao documento
+                    doc["area_m2"] = area
+                    areas.append(area)
+
+                    # Salva o documento atualizado
+                    output_path = os.path.join(output_dir, json_file)
+                    with open(output_path, "w") as f:
+                        json.dump(doc, f, indent=2)
+
+                    success += 1
+                    print(f"✓ Arquivo processado e salvo em: {output_path}")
+
+                except ValueError as ve:
+                    print(f"✗ Erro nos dados do documento: {str(ve)}")
+                    errors += 1
+                    continue
+
+            except Exception as e:
+                errors += 1
+                print(f"✗ Erro ao processar arquivo {json_file}: {str(e)}")
                 continue
 
-            # Get mask path
-            if "adjusted_detection" in doc:
-                mask_path = doc["adjusted_detection"]["mask_path"]
-            else:
-                mask_path = doc["original_detection"]["mask_path"]
+            # Mostra progresso a cada 10 documentos
+            if processed % 10 == 0:
+                print(f"\n--- Progresso: {processed}/{total_files} ---")
+                print(f"Sucessos: {success}")
+                print(f"Erros: {errors}")
 
-            # Calculate area
-            area_m2 = calculate_lot_area(mask_path, doc["metadata"])
+        # Calcula estatísticas
+        stats = {
+            "total_processed": processed,
+            "success": success,
+            "errors": errors,
+            "areas_stats": {},
+        }
 
-            if area_m2 > 0:
-                # Update document
-                doc["area_m2"] = area_m2
+        if areas:
+            stats["areas_stats"] = {
+                "min_area": min(areas),
+                "max_area": max(areas),
+                "avg_area": sum(areas) / len(areas),
+            }
 
-                # Update stats
-                stats["successful"] += 1
-                stats["total_area"] += area_m2
+        print("\n=== Resumo do processamento ===")
+        print(f"Total processado: {processed}")
+        print(f"Sucessos: {success}")
+        print(f"Erros: {errors}")
 
-                # Save processed document
-                with open(output_path, "w") as f:
-                    json.dump(doc, f, indent=2)
-            else:
-                stats["failed"] += 1
+        if areas:
+            print("\nEstatísticas das áreas:")
+            print(f"Mínima: {stats['areas_stats']['min_area']:.2f} m²")
+            print(f"Máxima: {stats['areas_stats']['max_area']:.2f} m²")
+            print(f"Média: {stats['areas_stats']['avg_area']:.2f} m²")
 
-        except Exception as e:
-            print(f"Error processing {filename}: {str(e)}")
-            stats["failed"] += 1
-            continue
+        return stats
 
-    # Calculate average area
-    if stats["successful"] > 0:
-        stats["average_area"] = stats["total_area"] / stats["successful"]
-
-    return stats
+    except Exception as e:
+        print(f"Erro durante o processamento: {str(e)}")
+        return {"error": str(e)}
