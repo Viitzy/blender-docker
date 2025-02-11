@@ -16,7 +16,6 @@ async def detect_lot_service(
     zoom: int = 20,
     confidence: float = 0.62,
     object_id: str = None,
-    street_name: str = None,
     year: str = None,
 ) -> Dict[str, Any]:
     """
@@ -39,7 +38,6 @@ async def detect_lot_service(
             "dimensions": "1280x1280",
             "zoom": zoom,
             "object_id": object_id or str(ObjectId()),
-            "street_name": street_name or "Unknown Street",
             "year": year or str(datetime.now().year),
         }
 
@@ -67,7 +65,6 @@ async def detect_lot_service(
                 "longitude": longitude,
                 "dimensions": "1280x1280",
                 "zoom": zoom,
-                "street_name": initial_data["street_name"],
                 "year": initial_data["year"],
             }
         ]
@@ -90,55 +87,67 @@ async def detect_lot_service(
 
         # Get detection data
         detection = processed_docs[0]
+        width = height = 1280  # 640x640 with scale=2
 
-        # Update MongoDB with detection results
+        # Função auxiliar para converter pontos para lat/lon
+        def convert_points_to_latlon(points):
+            converted_points = []
+            for x, y in points:
+                pixel_x = x * width
+                pixel_y = y * height
+                lat, lon = pixel_to_latlon(
+                    pixel_x=pixel_x,
+                    pixel_y=pixel_y,
+                    center_lat=latitude,
+                    center_lon=longitude,
+                    zoom=zoom,
+                    scale=2,
+                    image_width=width,
+                    image_height=height,
+                )
+                converted_points.append({"lat": lat, "lon": lon})
+            return converted_points
+
+        # Converte pontos originais e ajustados para lat/lon
+        original_points = convert_points_to_latlon(
+            detection["original_detection"]["polygon"]
+        )
+
+        # Prepara dados para atualização do MongoDB
         update_data = {
             "yolov8_annotation": detection["yolov8_annotation"],
             "confidence": detection["confidence"],
-            "original_detection": detection["original_detection"],
+            "original_detection": {
+                **detection["original_detection"],
+                "polygon_latlon": original_points,
+            },
             "original_area_pixels": detection["original_area_pixels"],
             "metadata": {
                 "latitude": latitude,
                 "longitude": longitude,
                 "dimensions": "1280x1280",
                 "zoom": zoom,
-                "street_name": initial_data["street_name"],
                 "year": initial_data["year"],
             },
         }
 
+        # Se houver detecção ajustada, converte seus pontos também
+        points_to_return = original_points
         if "adjusted_detection" in detection:
-            update_data["adjusted_detection"] = detection["adjusted_detection"]
-
-        # Get the detected polygon points
-        polygon = detection["original_detection"]["polygon"]
-        width = height = 1280  # 640x640 with scale=2
-
-        # Converte apenas os pontos do polígono para lat/lon
-        points = []
-        for x, y in polygon:
-            pixel_x = x * width
-            pixel_y = y * height
-            lat, lon = pixel_to_latlon(
-                pixel_x=pixel_x,
-                pixel_y=pixel_y,
-                center_lat=latitude,
-                center_lon=longitude,
-                zoom=zoom,
-                scale=2,
-                image_width=width,
-                image_height=height,
+            adjusted_points = convert_points_to_latlon(
+                detection["adjusted_detection"]["polygon"]
             )
-            points.append({"lat": lat, "lon": lon})
-
-        # Adiciona os pontos do polígono ao update_data
-        update_data["polygon_points"] = points
+            update_data["adjusted_detection"] = {
+                **detection["adjusted_detection"],
+                "polygon_latlon": adjusted_points,
+            }
+            points_to_return = adjusted_points
 
         # Atualiza MongoDB com todos os dados
         await mongo_db.update_detection(doc_id, update_data)
 
-        # Retorna apenas os pontos do polígono na resposta
-        return {"id": doc_id, "status": "success", "points": points}
+        # Retorna os pontos ajustados se disponíveis, senão os originais
+        return {"id": doc_id, "status": "success", "points": points_to_return}
 
     except Exception as e:
         return {
