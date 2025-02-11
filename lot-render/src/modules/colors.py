@@ -192,8 +192,20 @@ def process_lot_colors(
                 image_path = doc.get("metadata", {}).get("original_image")
                 if not image_path or not os.path.exists(image_path):
                     print(f"Imagem original não encontrada: {image_path}")
-                    errors += 1
-                    continue
+                    # Tenta encontrar a imagem no diretório satellite_images
+                    analysis_dir = Path(input_dir).parent.parent
+                    satellite_images_dir = (
+                        analysis_dir / "lots_detection" / "satellite_images"
+                    )
+                    image_name = f"satellite_{doc['id'].split('test_')[1]}.jpg"
+                    image_path = str(satellite_images_dir / image_name)
+                    print(f"Tentando caminho alternativo: {image_path}")
+                    if not os.path.exists(image_path):
+                        print(
+                            f"Imagem também não encontrada no caminho alternativo"
+                        )
+                        errors += 1
+                        continue
 
                 image = cv2.imread(image_path)
                 if image is None:
