@@ -41,8 +41,6 @@ class DetectLotResponse(BaseModel):
 class ProcessLotRequest(BaseModel):
     doc_id: str
     points: List[Point]
-    latitude: float  # Centro do lote
-    longitude: float  # Centro do lote
     zoom: int = 20
     confidence: float = 0.62
 
@@ -91,8 +89,6 @@ async def process_lot(request: ProcessLotRequest):
     result = await process_lot_service(
         doc_id=request.doc_id,
         points=request.points,
-        latitude=request.latitude,
-        longitude=request.longitude,
         zoom=request.zoom,
         confidence=request.confidence,
     )

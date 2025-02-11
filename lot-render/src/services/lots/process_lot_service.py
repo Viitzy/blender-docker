@@ -23,8 +23,6 @@ from ...modules.site_images import process_lot_images_for_site
 async def process_lot_service(
     doc_id: str,
     points: List[Dict[str, float]],
-    latitude: float,
-    longitude: float,
     zoom: int = 20,
     confidence: float = 0.62,
 ) -> Dict[str, Any]:
@@ -36,15 +34,30 @@ async def process_lot_service(
         mongo_db = MongoDB()
         google_maps = GoogleMapsAPI()
 
+        # Get the document from MongoDB to get latitude and longitude
+        doc = await mongo_db.get_detection(doc_id)
+        if not doc:
+            return {
+                "id": doc_id,
+                "status": "error",
+                "error": "Document not found in MongoDB",
+            }
+
+        # Get latitude and longitude from metadata
+        metadata = doc.get("metadata", {})
+        latitude = metadata.get("latitude")
+        longitude = metadata.get("longitude")
+
+        if not latitude or not longitude:
+            return {
+                "id": doc_id,
+                "status": "error",
+                "error": "Latitude and longitude not found in document metadata",
+            }
+
         # Create initial data for processing
         initial_data = {
             "id": doc_id,
-            "metadata": {
-                "latitude": latitude,
-                "longitude": longitude,
-                "dimensions": "1280x1280",
-                "zoom": zoom,
-            },
             "point_colors": {
                 "points_lat_lon": [[p["lat"], p["lon"]] for p in points]
             },
@@ -60,18 +73,8 @@ async def process_lot_service(
             {
                 "area_m2": area_m2,
                 "points_lat_lon": points_lat_lon,
-                "metadata": initial_data["metadata"],
             },
         )
-
-        # Get the document from MongoDB to proceed with next steps
-        doc = await mongo_db.get_detection(doc_id)
-        if not doc:
-            return {
-                "id": doc_id,
-                "status": "error",
-                "error": "Document not found in MongoDB",
-            }
 
         # Process colors
         colors_processed = process_lot_colors(
