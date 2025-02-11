@@ -33,6 +33,13 @@ async def process_lot_service(
         # Initialize services
         mongo_db = MongoDB()
         google_maps = GoogleMapsAPI()
+        mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING")
+        if not mongo_connection_string:
+            return {
+                "id": doc_id,
+                "status": "error",
+                "error": "MongoDB connection string not found in environment variables",
+            }
 
         # Get the document from MongoDB to get latitude and longitude
         doc = await mongo_db.get_detection(doc_id)
@@ -78,7 +85,7 @@ async def process_lot_service(
 
         # Process colors
         colors_processed = process_lot_colors(
-            mongodb_uri=mongo_db.connection_string,
+            mongodb_uri=mongo_connection_string,
             max_points=130,
             dark_threshold=70,
             bright_threshold=215,
@@ -99,7 +106,7 @@ async def process_lot_service(
                 / "watermark.png"
             )
             site_images_processed = process_lot_images_for_site(
-                mongodb_uri=mongo_db.connection_string,
+                mongodb_uri=mongo_connection_string,
                 bucket_name="gethome-lots",
                 hex_color="#e8f34e",
                 watermark_path=str(watermark_path),
