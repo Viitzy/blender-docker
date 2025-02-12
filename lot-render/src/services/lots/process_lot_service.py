@@ -138,7 +138,7 @@ async def process_lot_service(
         # Process elevations
         google_maps = GoogleMapsAPI()
         elevations_processed = process_lots_elevation(
-            mongodb_uri=mongo_db.connection_string,
+            mongodb_uri=mongo_connection_string,
             api_key=google_maps.api_key,
             doc_id=doc_id,
             confidence=confidence,
