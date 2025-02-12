@@ -400,7 +400,8 @@ def process_lot_colors(
             y_pixel = int(float(y) * height)
             polygon_points.append([x_pixel, y_pixel])
 
-        cv2.fillPoly(mask, [np.array(polygon_points)], 1)
+        pts = np.array(polygon_points, dtype=np.int32).reshape((-1, 1, 2))
+        cv2.fillPoly(mask, [pts], 1)
 
         # Generate internal points
         points_inside = get_points_inside_mask(mask, area, max_points)
@@ -415,10 +416,31 @@ def process_lot_colors(
             color = image[point[1], point[0]]
             colors.append(color.tolist())
 
-            # Adjust color if needed
-            adjusted_color = correct_colors(
-                color, dark_threshold, bright_threshold
+            # Create a single-row DataFrame for the pixel with columns [r,g,b,x,y,z].
+            # Note: OpenCV returns color in BGR, so we convert to RGB order.
+            df_color = pd.DataFrame(
+                [
+                    [
+                        int(color[2]),
+                        int(color[1]),
+                        int(color[0]),
+                        point[0],
+                        point[1],
+                        0,
+                    ]
+                ],
+                columns=["r", "g", "b", "x", "y", "z"],
             )
+
+            # Adjust color using correct_colors which expects a DataFrame
+            df_corrected = correct_colors(
+                df_color, dark_threshold, bright_threshold
+            )
+            adjusted_color = [
+                int(df_corrected.loc[0, "r"]),
+                int(df_corrected.loc[0, "g"]),
+                int(df_corrected.loc[0, "b"]),
+            ]
             colors_adjusted.append(adjusted_color)
 
             # Convert point to lat/lon
