@@ -115,10 +115,10 @@ def process_lot_images_for_site(
         db = client["gethome-01-hml"]
         collection = db["lots_detections_details_hmg"]
 
-        # Base query
+        # Consulta atualizada de acordo com a nova estrutura do documento
         query = {
-            "site_image_url": {"$exists": False},
-            "satellite_image_url": {"$exists": True},
+            "image_info.image_thumb_site": {"$exists": False},
+            "image_info.url": {"$exists": True},
             "confidence": {"$gte": confidence},
         }
 
@@ -136,11 +136,12 @@ def process_lot_images_for_site(
 
         for doc in collection.find(query):
             try:
-                doc_id = str(doc["_id"])
-                satellite_image_url = doc.get("satellite_image_url")
-
+                current_doc_id = str(doc["_id"])
+                satellite_image_url = doc.get("image_info", {}).get("url")
                 if not satellite_image_url:
-                    print("URL da imagem do satélite não encontrada")
+                    print(
+                        f"URL da imagem do satélite não encontrada para o documento {current_doc_id}"
+                    )
                     continue
 
                 # Extract blob path from gs:// URL, now using the new bucket name
@@ -210,7 +211,7 @@ def process_lot_images_for_site(
                     cv2.imwrite(temp_path, processed_image, encode_params)
 
                     # Upload para GCS na pasta site_images
-                    site_blob_path = f"site_images/{doc_id}.jpg"
+                    site_blob_path = f"site_images/{current_doc_id}.jpg"
                     blob = bucket.blob(site_blob_path)
                     blob.upload_from_filename(temp_path)
 
@@ -220,12 +221,16 @@ def process_lot_images_for_site(
                     # Atualiza MongoDB
                     collection.update_one(
                         {"_id": doc["_id"]},
-                        {"$set": {"site_image_url": site_image_url}},
+                        {
+                            "$set": {
+                                "image_info.image_thumb_site": site_image_url
+                            }
+                        },
                     )
 
                     processed_docs.append(
                         {
-                            "id": doc_id,
+                            "id": current_doc_id,
                             "site_image_url": site_image_url,
                             "confidence": doc.get("confidence"),
                         }
@@ -237,7 +242,7 @@ def process_lot_images_for_site(
                 os.unlink(temp_path)
 
             except Exception as e:
-                print(f"Erro ao processar documento {doc_id}: {str(e)}")
+                print(f"Erro ao processar documento {current_doc_id}: {str(e)}")
                 traceback.print_exc()
                 continue
 
