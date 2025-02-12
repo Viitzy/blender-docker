@@ -119,7 +119,7 @@ def process_lot_images_for_site(
         query = {
             "image_info.image_thumb_site": {"$exists": False},
             "image_info.url": {"$exists": True},
-            "confidence": {"$gte": confidence},
+            "detection_result.confidence": {"$gte": confidence},
         }
 
         if doc_id:
