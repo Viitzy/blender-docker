@@ -137,9 +137,6 @@ def process_lot_colors(
     print(f"- Threshold claro: {bright_threshold}")
     print(f"- Filtro de confiança: >= {confidence}")
 
-    if doc_id:
-        print(f"Processando documento específico: {doc_id}")
-
     client = None
     try:
         # Conecta ao MongoDB
@@ -147,23 +144,52 @@ def process_lot_colors(
         db = client.gethome
         collection = db.lots_coords
 
+        # Se foi especificado um ID, primeiro vamos verificar se o documento existe
+        if doc_id:
+            print(f"\nVerificando existência do documento {doc_id}")
+            try:
+                doc_object_id = ObjectId(doc_id)
+                doc = collection.find_one({"_id": doc_object_id})
+                if doc:
+                    print("Documento encontrado!")
+                    print(
+                        f"Satellite image URL exists: {doc.get('satellite_image_url') is not None}"
+                    )
+                    print(f"Confidence: {doc.get('confidence')}")
+                    print(
+                        f"Point colors exists: {doc.get('point_colors') is not None}"
+                    )
+                else:
+                    print("Documento não encontrado!")
+                    return []
+            except Exception as e:
+                print(f"Erro ao converter ou buscar documento: {str(e)}")
+                return []
+
         # Monta a query base
         query = {
             "satellite_image_url": {"$exists": True},
             "confidence": {"$gte": confidence},
-            "point_colors": {
-                "$exists": False
-            },  # Só processa se ainda não tiver cores
         }
 
         # Se foi especificado um ID, adiciona à query
         if doc_id:
             query["_id"] = ObjectId(doc_id)
-            # Para o caso específico de reprocessamento, removemos a checagem de point_colors
-            del query["point_colors"]
+            print("\nQuery final:")
+            print(query)
+
+        # Primeiro, vamos ver quantos documentos existem sem nenhum filtro de point_colors
+        total_docs_without_point_colors = collection.count_documents(query)
+        print(
+            f"\nTotal de documentos sem filtro de point_colors: {total_docs_without_point_colors}"
+        )
+
+        # Agora adiciona o filtro de point_colors se não for um doc_id específico
+        if not doc_id:
+            query["point_colors"] = {"$exists": False}
 
         total_docs = collection.count_documents(query)
-        print(f"\nTotal de documentos para processar: {total_docs}")
+        print(f"Total de documentos para processar: {total_docs}")
 
         processed_docs = []
         processed = 0
