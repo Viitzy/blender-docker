@@ -114,24 +114,28 @@ def calculate_lot_area(doc: dict) -> float:
     """
     Calcula a área do lote em metros quadrados usando as funções do pixel_to_geo.py
     """
-    # Get coordinates from new structure
-    center_lat = doc["coordinates"]["lat"]
-    center_lon = doc["coordinates"]["lon"]
-    zoom = doc["image_info"]["zoom"]
-    scale = doc["image_info"].get("scale", 2)  # default to 2 if not provided
+    # Get coordinates from new structure, with fallback to old keys if needed
+    center_lat = doc.get("coordinates", {}).get("lat", doc.get("latitude"))
+    center_lon = doc.get("coordinates", {}).get("lon", doc.get("longitude"))
+    zoom = doc.get("image_info", {}).get("zoom", 20)
+    scale = doc.get("image_info", {}).get("scale", 2)
     width = height = 1280  # Fixed dimensions
 
-    # Use adjusted annotation if available, otherwise the original
-    if "adjusted_detection" in doc:
-        annotation = doc["adjusted_detection"]["annotation"]
+    # Retrieve polygon points from detection result; fallback to 'yolov8_annotation' if necessary
+    if "detection_result" in doc:
+        if "adjusted_mask" in doc["detection_result"]:
+            points_array = doc["detection_result"]["adjusted_mask"]["points"]
+        else:
+            points_array = doc["detection_result"].get(
+                "mask_points", doc.get("yolov8_annotation", [])
+            )
     else:
-        annotation = doc["yolov8_annotation"]
+        points_array = doc.get("yolov8_annotation", [])
 
-    points_str = annotation.split()[1:]
     geo_points = []
-    for i in range(0, len(points_str), 2):
-        pixel_x = float(points_str[i]) * width
-        pixel_y = float(points_str[i + 1]) * height
+    for i in range(0, len(points_array), 2):
+        pixel_x = float(points_array[i]) * width
+        pixel_y = float(points_array[i + 1]) * height
         lat, lon = pixel_to_latlon(
             pixel_x=pixel_x,
             pixel_y=pixel_y,
@@ -338,12 +342,19 @@ def process_lot_colors(
         print("Gerando máscara do polígono...")
         mask = np.zeros((height, width), dtype=np.uint8)
 
-        if "adjusted_mask" in doc["detection_result"]:
-            print("Usando detecção ajustada...")
-            points_array = doc["detection_result"]["adjusted_mask"]["points"]
+        if "detection_result" in doc:
+            if "adjusted_mask" in doc["detection_result"]:
+                print("Usando detecção ajustada...")
+                points_array = doc["detection_result"]["adjusted_mask"][
+                    "points"
+                ]
+            else:
+                print("Usando detecção original...")
+                points_array = doc["detection_result"].get(
+                    "mask_points", doc.get("yolov8_annotation", [])
+                )
         else:
-            print("Usando detecção original...")
-            points_array = doc["detection_result"]["mask_points"]
+            points_array = doc.get("yolov8_annotation", [])
 
         # Convert normalized points to pixel coordinates
         polygon_points = []
