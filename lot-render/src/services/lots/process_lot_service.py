@@ -92,6 +92,7 @@ async def process_lot_service(
         )
 
         # Process colors
+        print(f"\nProcessing colors for document: {doc_id}")
         colors_processed = process_lot_colors(
             mongodb_uri=mongo_connection_string,
             max_points=130,
@@ -101,8 +102,9 @@ async def process_lot_service(
             doc_id=doc_id,
         )
 
-        if colors_processed:
+        if colors_processed and len(colors_processed) > 0:
             point_colors = colors_processed[0].get("point_colors", {})
+            print(f"Colors processed successfully: {point_colors}")
             await mongo_db.update_detection(
                 doc_id, {"point_colors": point_colors}
             )
@@ -116,7 +118,6 @@ async def process_lot_service(
             )
             site_images_processed = process_lot_images_for_site(
                 mongodb_uri=mongo_connection_string,
-                bucket_name="gethome-lots",
                 hex_color="#e8f34e",
                 watermark_path=str(watermark_path),
                 doc_id=doc_id,

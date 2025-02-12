@@ -124,53 +124,43 @@ def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
 
 def process_lot_colors(
     mongodb_uri: str,
-    output_folder: str = None,
     max_points: int = 130,
     dark_threshold: int = 70,
     bright_threshold: int = 215,
     confidence: float = 0.62,
     doc_id: str = None,
 ) -> list:
-    """
-    Processa cores dos lotes usando MongoDB.
-
-    Args:
-        mongodb_uri (str): URI de conexão com MongoDB
-        output_folder (str): Diretório para salvar visualizações (opcional)
-        max_points (int): Número máximo de pontos por lote
-        dark_threshold (int): Limiar para cores escuras
-        bright_threshold (int): Limiar para cores claras
-        confidence (float): Valor mínimo de confiança
-        doc_id (str): ID específico do documento (opcional)
-
-    Returns:
-        list: Lista de documentos processados
-    """
-    print("\n=== Iniciando processamento de cores dos lotes ===")
+    print(f"\n=== Iniciando processamento de cores dos lotes ===")
     print(f"Parâmetros:")
     print(f"- Máximo de pontos: {max_points}")
     print(f"- Threshold escuro: {dark_threshold}")
     print(f"- Threshold claro: {bright_threshold}")
     print(f"- Filtro de confiança: >= {confidence}")
 
+    if doc_id:
+        print(f"Processando documento específico: {doc_id}")
+
     client = None
     try:
-        # Estabelece conexão com MongoDB
+        # Conecta ao MongoDB
         client = MongoClient(mongodb_uri)
         db = client.gethome
         collection = db.lots_coords
 
         # Monta a query base
         query = {
-            "point_colors.points_lat_lon": {"$exists": True},
-            "point_colors.points_colors": {"$exists": False},
+            "satellite_image_url": {"$exists": True},
             "confidence": {"$gte": confidence},
+            "point_colors": {
+                "$exists": False
+            },  # Só processa se ainda não tiver cores
         }
 
         # Se foi especificado um ID, adiciona à query
         if doc_id:
             query["_id"] = ObjectId(doc_id)
-            print(f"Processando documento específico: {doc_id}")
+            # Para o caso específico de reprocessamento, removemos a checagem de point_colors
+            del query["point_colors"]
 
         total_docs = collection.count_documents(query)
         print(f"\nTotal de documentos para processar: {total_docs}")
