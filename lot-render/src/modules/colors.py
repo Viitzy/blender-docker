@@ -133,20 +133,37 @@ def calculate_lot_area(doc: dict) -> float:
         points_array = doc.get("yolov8_annotation", [])
 
     geo_points = []
-    for i in range(0, len(points_array), 2):
-        pixel_x = float(points_array[i]) * width
-        pixel_y = float(points_array[i + 1]) * height
-        lat, lon = pixel_to_latlon(
-            pixel_x=pixel_x,
-            pixel_y=pixel_y,
-            center_lat=center_lat,
-            center_lon=center_lon,
-            zoom=zoom,
-            scale=scale,
-            image_width=width,
-            image_height=height,
-        )
-        geo_points.append((lat, lon))
+    if points_array and isinstance(points_array[0], list):
+        for point in points_array:
+            x, y = point
+            pixel_x = float(x) * width
+            pixel_y = float(y) * height
+            lat, lon = pixel_to_latlon(
+                pixel_x=pixel_x,
+                pixel_y=pixel_y,
+                center_lat=center_lat,
+                center_lon=center_lon,
+                zoom=zoom,
+                scale=scale,
+                image_width=width,
+                image_height=height,
+            )
+            geo_points.append((lat, lon))
+    else:
+        for i in range(0, len(points_array), 2):
+            pixel_x = float(points_array[i]) * width
+            pixel_y = float(points_array[i + 1]) * height
+            lat, lon = pixel_to_latlon(
+                pixel_x=pixel_x,
+                pixel_y=pixel_y,
+                center_lat=center_lat,
+                center_lon=center_lon,
+                zoom=zoom,
+                scale=scale,
+                image_width=width,
+                image_height=height,
+            )
+            geo_points.append((lat, lon))
 
     return calculate_geo_area(geo_points)
 
@@ -356,11 +373,20 @@ def process_lot_colors(
         else:
             points_array = doc.get("yolov8_annotation", [])
 
-        # Convert normalized points to pixel coordinates
+        # Flatten points_array if it is nested (e.g., [[x, y], [x, y], ...] vs [[[x, y], [x, y], ...]])
+        if points_array and isinstance(points_array[0][0], list):
+            points_array = points_array[0]
+
+        # Convert normalized points to pixel coordinates, recursively unwrapping nested coordinate values if needed
         polygon_points = []
-        for x, y in points_array:
-            x_pixel = int(x * width)
-            y_pixel = int(y * height)
+        for point in points_array:
+            x, y = point
+            while isinstance(x, list):
+                x = x[0]
+            while isinstance(y, list):
+                y = y[0]
+            x_pixel = int(float(x) * width)
+            y_pixel = int(float(y) * height)
             polygon_points.append([x_pixel, y_pixel])
 
         cv2.fillPoly(mask, [np.array(polygon_points)], 1)
@@ -379,7 +405,7 @@ def process_lot_colors(
             colors.append(color.tolist())
 
             # Adjust color if needed
-            adjusted_color = correct_color(
+            adjusted_color = correct_colors(
                 color, dark_threshold, bright_threshold
             )
             colors_adjusted.append(adjusted_color)
