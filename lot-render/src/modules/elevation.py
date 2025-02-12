@@ -179,10 +179,10 @@ def process_lots_elevation(
         client = MongoClient(mongodb_uri)
         db = client["gethome-01-hml"]
         collection = db["lots_detections_details_hmg"]
-        # Monta a query base
+        # Monta a query base para documentos com pontos lat/lon em lot_details e que ainda não tenham elevações processadas
         query = {
-            "point_colors.points_lat_lon": {"$exists": True},
-            "point_colors.lat_lon_elevation": {"$exists": False},
+            "lot_details.point_colors.points_lat_lon": {"$exists": True},
+            "lot_details.elevations": {"$size": 0},
             "confidence": {"$gte": confidence},
         }
 
@@ -210,10 +210,13 @@ def process_lots_elevation(
             try:
                 print(f"\nProcessando documento {i}/{total_docs}")
                 print(f"ID: {doc['_id']}")
-                print(f"Rua: {doc.get('street_name', 'N/A')}")
+                # Se disponível, mostra o nome da rua; senão, tenta pegar do campo top-level 'street'
+                print(f"Rua: {doc.get('street', 'N/A')}")
 
-                # Obtém pontos lat/lon
-                points_lat_lon = doc["point_colors"]["points_lat_lon"]
+                # Obtém os pontos lat/lon do novo formato
+                points_lat_lon = doc["lot_details"]["point_colors"][
+                    "points_lat_lon"
+                ]
                 print(f"Total de pontos para elevação: {len(points_lat_lon)}")
 
                 # Obtém elevações
@@ -227,7 +230,7 @@ def process_lots_elevation(
 
                 result = collection.update_one(
                     {"_id": doc["_id"]},
-                    {"$set": {"point_colors": point_colors}},
+                    {"$set": {"lot_details.elevations": elevations}},
                 )
 
                 if result.modified_count > 0:
