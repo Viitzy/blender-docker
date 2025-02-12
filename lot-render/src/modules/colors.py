@@ -5,51 +5,15 @@ from typing import Dict, List, Any, Tuple
 import cv2
 import numpy as np
 from PIL import Image
-from .pixel_to_geo import pixel_to_latlon
+from .pixel_to_geo import pixel_to_latlon, extract_zoom
 from .lot_colors_adjustment import correct_colors
 import pandas as pd
 import traceback
 import random
 from pymongo import MongoClient
 from bson.objectid import ObjectId
-
-
-def save_visualizations(
-    image,
-    polygon_points,
-    points_inside,
-    colors_rgb,
-    df_corrected,
-    doc_id,
-    output_folder,
-):
-    """Helper function para salvar visualizações"""
-    # Visualização original
-    vis_image = image.copy()
-    cv2.polylines(vis_image, [np.array(polygon_points)], True, (0, 255, 0), 2)
-    for i, (x, y) in enumerate(points_inside):
-        r, g, b = colors_rgb[i]
-        cv2.circle(vis_image, (x, y), 3, (b, g, r), -1)
-
-    # Visualização com cores corrigidas
-    vis_image_corrected = image.copy()
-    cv2.polylines(
-        vis_image_corrected, [np.array(polygon_points)], True, (0, 255, 0), 2
-    )
-    for i, (x, y) in enumerate(points_inside):
-        r = int(df_corrected.iloc[i]["r"])
-        g = int(df_corrected.iloc[i]["g"])
-        b = int(df_corrected.iloc[i]["b"])
-        cv2.circle(vis_image_corrected, (x, y), 3, (b, g, r), -1)
-
-    os.makedirs(output_folder, exist_ok=True)
-    cv2.imwrite(
-        os.path.join(output_folder, f"{doc_id}_points_original.jpg"), vis_image
-    )
-    cv2.imwrite(
-        os.path.join(output_folder, f"{doc_id}_points_corrected.jpg"),
-        vis_image_corrected,
-    )
+from google.cloud import storage
+import math
 
 
 def compute_number_of_points(area_m2: float) -> int:
@@ -122,15 +86,117 @@ def rgb_to_hex(rgb: Tuple[int, int, int]) -> str:
     return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
+def calculate_geo_area(points: list) -> float:
+    """
+    Calcula a área de um polígono em metros quadrados usando coordenadas geográficas.
+    Usa a fórmula de Haversine para considerar a curvatura da Terra.
+    """
+    R = 6371000
+
+    if points[0] != points[-1]:
+        points = points + [points[0]]
+
+    area = 0.0
+    for i in range(len(points) - 1):
+        lat1, lon1 = points[i]
+        lat2, lon2 = points[i + 1]
+
+        lat1, lon1 = math.radians(lat1), math.radians(lon1)
+        lat2, lon2 = math.radians(lat2), math.radians(lon2)
+
+        area += (lon2 - lon1) * (2 + math.sin(lat1) + math.sin(lat2))
+
+    area = abs(area * R * R / 2.0)
+    return area
+
+
+def calculate_lot_area(doc: dict) -> float:
+    """
+    Calcula a área do lote em metros quadrados usando as funções do pixel_to_geo.py
+    """
+    center_lat = doc["latitude"]
+    center_lon = doc["longitude"]
+    zoom = doc.get("zoom") or extract_zoom(doc["image_url"])
+    width, height = map(int, doc["dimensions"].split("x"))
+
+    points_str = doc["adjusted_yolov8_annotation"].split()[1:]
+    geo_points = []
+
+    for i in range(0, len(points_str), 2):
+        pixel_x = float(points_str[i]) * width
+        pixel_y = float(points_str[i + 1]) * height
+        lat, lon = pixel_to_latlon(
+            pixel_x=pixel_x,
+            pixel_y=pixel_y,
+            center_lat=center_lat,
+            center_lon=center_lon,
+            zoom=zoom,
+            scale=2,
+            image_width=width,
+            image_height=height,
+        )
+        geo_points.append((lat, lon))
+
+    return calculate_geo_area(geo_points)
+
+
+def download_image_from_gcs(image_url: str) -> np.ndarray:
+    """
+    Baixa imagem do Google Cloud Storage.
+    """
+    try:
+        # Remove o prefixo 'https://storage.cloud.google.com/' se presente
+        if image_url.startswith("https://storage.cloud.google.com/"):
+            bucket_path = image_url.replace(
+                "https://storage.cloud.google.com/", ""
+            )
+        else:
+            bucket_path = image_url
+
+        # Separa o nome do bucket e o caminho do blob
+        parts = bucket_path.split("/", 1)
+        bucket_name = parts[0]
+        blob_path = parts[1]
+
+        # Inicializa cliente GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+
+        # Baixa os bytes da imagem
+        image_bytes = blob.download_as_bytes()
+
+        # Converte para numpy array
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        return image
+    except Exception as e:
+        print(f"Erro ao baixar imagem: {str(e)}")
+        return None
+
+
 def process_lot_colors(
     mongodb_uri: str,
+    doc_id: str,
     max_points: int = 130,
     dark_threshold: int = 70,
     bright_threshold: int = 215,
     confidence: float = 0.62,
-    doc_id: str = None,
 ) -> list:
-    print(f"\n=== Iniciando processamento de cores dos lotes ===")
+    """
+    Processa as cores do lote específico, adiciona coordenadas geográficas e corrige cores escuras e claras.
+
+    Args:
+        mongodb_uri (str): URI de conexão com MongoDB
+        doc_id (str): ID do documento para processar
+        max_points (int): Número máximo de pontos a serem gerados
+        dark_threshold (int): Limite para cores escuras
+        bright_threshold (int): Limite para cores claras
+        confidence (float): Valor mínimo de confiança
+    """
+    print("\n=== Iniciando processamento de cores do lote ===")
+    print(f"ID do documento: {doc_id}")
     print(f"Parâmetros:")
     print(f"- Máximo de pontos: {max_points}")
     print(f"- Threshold escuro: {dark_threshold}")
@@ -139,207 +205,159 @@ def process_lot_colors(
 
     client = None
     try:
-        # Conecta ao MongoDB com os nomes corretos do banco e collection
+        # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client["gethome-01-hml"]  # Nome correto do banco
-        collection = db[
-            "lots_detections_details_hmg"
-        ]  # Nome correto da collection
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
-        if doc_id:
-            print(f"\nVerificando existência do documento {doc_id}")
-            try:
-                query = {"_id": ObjectId(doc_id)}
-                print(f"Query de busca: {query}")
-                print(f"Database: gethome-01-hmg")
-                print(f"Collection: lots_coords")
-
-                doc = collection.find_one(query)
-                print(f"Documento encontrado: {doc}")
-
-                if doc:
-                    print("Documento encontrado!")
-                    print(
-                        f"Satellite image URL exists: {doc.get('satellite_image_url') is not None}"
-                    )
-                    print(f"Confidence: {doc.get('confidence')}")
-                    print(
-                        f"Point colors exists: {doc.get('point_colors') is not None}"
-                    )
-                else:
-                    print("Documento não encontrado!")
-                    return []
-            except Exception as e:
-                print(f"Erro ao converter ou buscar documento: {str(e)}")
-                return []
-
-        # Monta a query base
-        query = {
-            "satellite_image_url": {"$exists": True},
-            "confidence": {"$gte": confidence},
-        }
-
-        # Se foi especificado um ID, adiciona à query
-        if doc_id:
-            query["_id"] = ObjectId(doc_id)
-            print("\nQuery final:")
-            print(query)
-
-        # Primeiro, vamos ver quantos documentos existem sem nenhum filtro de point_colors
-        total_docs_without_point_colors = collection.count_documents(query)
-        print(
-            f"\nTotal de documentos sem filtro de point_colors: {total_docs_without_point_colors}"
+        # Busca o documento específico
+        doc = collection.find_one(
+            {
+                "_id": ObjectId(doc_id),
+                "confidence": {"$gte": confidence},
+                "satellite_image_url": {"$exists": True},
+            }
         )
 
-        # Agora adiciona o filtro de point_colors se não for um doc_id específico
-        if not doc_id:
-            query["point_colors"] = {"$exists": False}
-
-        total_docs = collection.count_documents(query)
-        print(f"Total de documentos para processar: {total_docs}")
+        if not doc:
+            print(
+                f"Documento {doc_id} não encontrado ou não atende aos critérios"
+            )
+            return []
 
         processed_docs = []
-        processed = 0
-        errors = 0
+        try:
+            print("\n--- Processando documento ---")
 
-        for doc in collection.find(query):
-            try:
-                processed += 1
+            # Calcula ou obtém a área do lote
+            if "area_m2" not in doc:
+                area = calculate_lot_area(doc)
+                print(f"Área calculada: {area:.2f} m²")
+                collection.update_one(
+                    {"_id": doc["_id"]}, {"$set": {"area_m2": area}}
+                )
+                doc["area_m2"] = area
+            else:
+                area = doc["area_m2"]
+                print(f"Área existente: {area:.2f} m²")
+
+            # Baixa a imagem do bucket images_from_have_allotment
+            print("Baixando imagem...")
+            image = download_image_from_gcs(doc["satellite_image_url"])
+            if image is None:
+                print("Erro ao baixar imagem")
+                return []
+
+            height, width = image.shape[:2]
+            print(f"Dimensões da imagem: {width}x{height}")
+
+            # Cria máscara do polígono
+            print("Gerando máscara do polígono...")
+            mask = np.zeros((height, width), dtype=np.uint8)
+            points = doc["adjusted_yolov8_annotation"].split()[1:]
+            polygon_points = []
+
+            for i in range(0, len(points), 2):
+                x = float(points[i]) * width
+                y = float(points[i + 1]) * height
+                polygon_points.append([int(x), int(y)])
+
+            cv2.fillPoly(mask, [np.array(polygon_points)], 1)
+
+            # Gera pontos internos
+            print("Gerando pontos internos...")
+            points_inside = get_points_inside_mask(mask, area)
+            print(f"Pontos gerados: {len(points_inside)}")
+
+            # Limita o número de pontos se necessário
+            if len(points_inside) > max_points:
                 print(
-                    f"\n--- Processando documento {processed}/{total_docs} ---"
+                    f"Reduzindo número de pontos de {len(points_inside)} para {max_points}"
                 )
-                print(f"ID: {doc['_id']}")
-                print(f"Street: {doc.get('street_name', 'N/A')}")
+                indices = np.linspace(
+                    0, len(points_inside) - 1, max_points, dtype=int
+                )
+                points_inside = [points_inside[i] for i in indices]
 
-                # Verifica se tem área
-                area = doc.get("area_m2")
-                if area is None:
-                    print("Área não encontrada no documento")
-                    errors += 1
-                    continue
+            # Processa cores e coordenadas
+            print("Processando cores e coordenadas...")
+            colors = []
+            colors_rgb = []
+            normalized_points = []
+            geo_points = []
 
-                print(f"Área do lote: {area:.2f} m²")
+            for x, y in points_inside:
+                bgr_color = image[y, x]
+                rgb_color = (
+                    int(bgr_color[2]),
+                    int(bgr_color[1]),
+                    int(bgr_color[0]),
+                )
+                hex_color = rgb_to_hex(rgb_color)
+                colors.append(hex_color)
+                colors_rgb.append(rgb_color)
 
-                # Obtém os pontos lat/lon
-                points_lat_lon = doc.get("points_lat_lon")
-                if not points_lat_lon:
-                    print("Pontos lat/lon não encontrados")
-                    errors += 1
-                    continue
-
-                # Calcula o número de pontos baseado na área
-                n_points = min(compute_number_of_points(area), max_points)
-                print(f"Número de pontos a processar: {n_points}")
-
-                # Seleciona pontos aleatoriamente se necessário
-                if len(points_lat_lon) > n_points:
-                    indices = np.random.choice(
-                        len(points_lat_lon), size=n_points, replace=False
-                    )
-                    selected_points = [points_lat_lon[i] for i in indices]
-                else:
-                    selected_points = points_lat_lon
-
-                # Processa cores e coordenadas
-                print("Processando cores e coordenadas...")
-                colors = []
-                colors_rgb = []
-                normalized_points = []
-                geo_points = []
-
-                metadata = doc.get("metadata", {})
-                center_lat = metadata.get("latitude")
-                center_lon = metadata.get("longitude")
-                zoom = metadata.get("zoom", 20)
-
-                for lat, lon in selected_points:
-                    # Converte para coordenadas normalizadas
-                    x, y = pixel_to_latlon(
-                        lat=lat,
-                        lon=lon,
-                        center_lat=center_lat,
-                        center_lon=center_lon,
-                        zoom=zoom,
-                        scale=2,
-                        image_width=1280,
-                        image_height=1280,
-                    )
-
-                    # Gera uma cor da terra
-                    r, g, b = random_earthy_color()
-                    hex_color = rgb_to_hex((r, g, b))
-
-                    colors.append(hex_color)
-                    colors_rgb.append((r, g, b))
-                    normalized_points.append([round(x, 3), round(y, 3)])
-                    geo_points.append([round(lat, 6), round(lon, 6)])
-
-                # Correção de cores
-                print("Aplicando correção de cores...")
-                df_colors = pd.DataFrame(colors_rgb, columns=["r", "g", "b"])
-                df_colors["x"] = [p[0] for p in normalized_points]
-                df_colors["y"] = [p[1] for p in normalized_points]
-                df_colors["z"] = 0
-
-                df_corrected = correct_colors(
-                    df_colors,
-                    dark_threshold=dark_threshold,
-                    bright_threshold=bright_threshold,
+                normalized_points.append(
+                    [round(float(x) / width, 3), round(float(y) / height, 3)]
                 )
 
-                colors_adjusted = []
-                for _, row in df_corrected.iterrows():
-                    rgb = (int(row["r"]), int(row["g"]), int(row["b"]))
-                    hex_color = rgb_to_hex(rgb)
-                    colors_adjusted.append(hex_color)
-
-                # Salva visualização se necessário
-                if output_folder:
-                    print("Salvando visualizações...")
-                    save_visualizations(
-                        image=None,  # Não temos mais a imagem
-                        polygon_points=None,  # Não temos mais os pontos do polígono
-                        points_inside=None,  # Não temos mais os pontos internos
-                        colors_rgb=colors_rgb,
-                        df_corrected=df_corrected,
-                        doc_id=str(doc["_id"]),
-                        output_folder=output_folder,
-                    )
-
-                # Prepara dados de cores para atualizar
-                point_colors = {
-                    "points": normalized_points,
-                    "colors": colors,
-                    "colors_adjusted": colors_adjusted,
-                    "points_lat_lon": geo_points,
-                }
-
-                # Atualiza MongoDB
-                print("Atualizando documento no MongoDB...")
-                result = collection.update_one(
-                    {"_id": doc["_id"]},
-                    {"$set": {"point_colors": point_colors}},
+                lat, lon = pixel_to_latlon(
+                    pixel_x=x,
+                    pixel_y=y,
+                    center_lat=doc["latitude"],
+                    center_lon=doc["longitude"],
+                    zoom=doc.get("zoom") or extract_zoom(doc["image_url"]),
+                    scale=2,
+                    image_width=width,
+                    image_height=height,
                 )
+                geo_points.append([round(lat, 6), round(lon, 6)])
 
-                if result.modified_count > 0:
-                    doc["point_colors"] = point_colors
-                    processed_docs.append(doc)
-                    print("Documento atualizado com sucesso!")
-                else:
-                    print("Nenhuma atualização necessária")
+            # Correção de cores
+            print("Aplicando correção de cores...")
+            df_colors = pd.DataFrame(colors_rgb, columns=["r", "g", "b"])
+            df_colors["x"] = [p[0] for p in normalized_points]
+            df_colors["y"] = [p[1] for p in normalized_points]
+            df_colors["z"] = 0
 
-            except Exception as e:
-                errors += 1
-                print(
-                    f"\nERRO ao processar documento {doc.get('_id')}: {str(e)}"
-                )
-                traceback.print_exc()
-                continue
+            df_corrected = correct_colors(
+                df_colors,
+                dark_threshold=dark_threshold,
+                bright_threshold=bright_threshold,
+            )
+
+            colors_adjusted = []
+            for _, row in df_corrected.iterrows():
+                rgb = (int(row["r"]), int(row["g"]), int(row["b"]))
+                hex_color = rgb_to_hex(rgb)
+                colors_adjusted.append(hex_color)
+
+            # Atualiza MongoDB
+            print("Atualizando documento no MongoDB...")
+            point_colors = {
+                "points": normalized_points,
+                "colors": colors,
+                "colors_adjusted": colors_adjusted,
+                "points_lat_lon": geo_points,
+            }
+
+            result = collection.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"point_colors": point_colors}},
+            )
+
+            if result.modified_count > 0:
+                doc["point_colors"] = point_colors
+                processed_docs.append(doc)
+                print("Documento atualizado com sucesso!")
+
+        except Exception as e:
+            print(f"\nERRO ao processar documento {doc_id}: {str(e)}")
+            traceback.print_exc()
 
         print("\n=== Resumo do processamento ===")
-        print(f"Total de documentos: {total_docs}")
-        print(f"Processados com sucesso: {len(processed_docs)}")
-        print(f"Erros: {errors}")
+        print(f"Documento processado: {doc_id}")
+        print(f"Status: {'Sucesso' if processed_docs else 'Falha'}")
         print("==============================\n")
 
         return processed_docs
@@ -349,7 +367,6 @@ def process_lot_colors(
         raise
 
     finally:
-        # Fecha a conexão com segurança
         if client:
             try:
                 client.close()
