@@ -35,23 +35,30 @@ async def detect_lot_service(
         if not model_path:
             raise ValueError("YOLO_MODEL_PATH not found")
 
-        # Create initial document
+        # Prepare initial document structure
+        current_year = str(datetime.now().year)
+        current_month = datetime.now().strftime("%m")
+        current_datetime = datetime.utcnow()
+
         initial_data = {
-            "latitude": latitude,
-            "longitude": longitude,
-            "dimensions": "1280x1280",
-            "zoom": zoom,
-            "object_id": object_id or str(ObjectId()),
-            "year": year or str(datetime.now().year),
+            "coordinates": {"lat": latitude, "lon": longitude},
+            "image_info": {
+                "zoom": zoom,
+                "scale": 2,
+                "year": year or current_year,
+                "month": current_month,
+                "captured_at": current_datetime,
+            },
+            "created_at": current_datetime,
+            "updated_at": current_datetime,
+            "detection_index": 0,
+            "detection_id": None,
         }
 
         # Insert initial document
         doc_id = await mongo_db.insert_detection(initial_data)
 
-        # Get satellite image
-        print(
-            f"Detection - Getting satellite image for coordinates: {latitude}, {longitude}"
-        )
+        # Get satellite image and save to GCS
         image_content = google_maps.get_satellite_image(
             lat=latitude,
             lng=longitude,
@@ -60,46 +67,42 @@ async def detect_lot_service(
             scale=2,
         )
 
-        # Save image to GCS in the correct path
+        # Save image to GCS and update image_info
         blob_path = f"satellite_images/{doc_id}.jpg"
         blob = bucket.blob(blob_path)
 
-        # Create a temporary file to save the image
         with tempfile.NamedTemporaryFile(
             suffix=".jpg", delete=False
         ) as temp_file:
             temp_file.write(image_content)
             temp_file.flush()
-
-            # Upload to GCS
             blob.upload_from_filename(temp_file.name)
-
-            # Generate public URL
-            satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
-
-            # Delete temporary file
             os.unlink(temp_file.name)
 
-        # Update MongoDB with the public URL
-        await mongo_db.update_detection(
-            doc_id, {"satellite_image_url": satellite_image_url}
-        )
+        # Update image URL in MongoDB
+        satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
 
-        # Prepare items list for detection
+        image_info_update = {
+            "image_info.url": satellite_image_url,
+            "image_info.path": blob_path,
+            "updated_at": datetime.utcnow(),
+        }
+
+        await mongo_db.update_detection(doc_id, image_info_update)
+
+        # Process detection
         items_list = [
             {
-                "image_content": image_content,  # Still need the content for detection
+                "image_content": image_content,
                 "object_id": initial_data["object_id"],
                 "latitude": latitude,
                 "longitude": longitude,
                 "dimensions": "1280x1280",
                 "zoom": zoom,
-                "year": initial_data["year"],
+                "year": initial_data["image_info"]["year"],
             }
         ]
 
-        # Execute lot detection
-        print(f"Detection - Starting lot detection with model: {model_path}")
         processed_docs = detect_lots_and_save(
             model_path=model_path,
             items_list=items_list,
@@ -114,69 +117,45 @@ async def detect_lot_service(
                 "points": [],
             }
 
-        # Get detection data
+        # Update detection results
         detection = processed_docs[0]
-        width = height = 1280  # 640x640 with scale=2
-
-        # Função auxiliar para converter pontos para lat/lon
-        def convert_points_to_latlon(points):
-            converted_points = []
-            for x, y in points:
-                pixel_x = x * width
-                pixel_y = y * height
-                lat, lon = pixel_to_latlon(
-                    pixel_x=pixel_x,
-                    pixel_y=pixel_y,
-                    center_lat=latitude,
-                    center_lon=longitude,
-                    zoom=zoom,
-                    scale=2,
-                    image_width=width,
-                    image_height=height,
-                )
-                converted_points.append({"lat": lat, "lon": lon})
-            return converted_points
-
-        # Converte pontos originais e ajustados para lat/lon
-        original_points = convert_points_to_latlon(
-            detection["original_detection"]["polygon"]
-        )
-
-        # Prepara dados para atualização do MongoDB
-        update_data = {
-            "yolov8_annotation": detection["yolov8_annotation"],
-            "confidence": detection["confidence"],
-            "original_detection": {
-                **detection["original_detection"],
-                "polygon_latlon": original_points,
-            },
-            "original_area_pixels": detection["original_area_pixels"],
-            "metadata": {
-                "latitude": latitude,
-                "longitude": longitude,
-                "dimensions": "1280x1280",
-                "zoom": zoom,
-                "year": initial_data["year"],
-            },
+        detection_result = {
+            "detection_result": {
+                "center": {
+                    "pixel": {
+                        "x": detection["original_detection"]["polygon"][0][0],
+                        "y": detection["original_detection"]["polygon"][0][1],
+                    },
+                    "geo": {"lat": latitude, "lon": longitude},
+                },
+                "confidence": detection["confidence"],
+                "mask_points": detection["original_detection"]["polygon"],
+                "processed_at": datetime.utcnow(),
+            }
         }
 
-        # Se houver detecção ajustada, converte seus pontos também
-        points_to_return = original_points
         if "adjusted_detection" in detection:
-            adjusted_points = convert_points_to_latlon(
-                detection["adjusted_detection"]["polygon"]
-            )
-            update_data["adjusted_detection"] = {
-                **detection["adjusted_detection"],
-                "polygon_latlon": adjusted_points,
+            detection_result["detection_result"]["adjusted_mask"] = {
+                "points": detection["adjusted_detection"]["polygon"],
+                "geo_points": [],  # Will be filled with converted coordinates
+                "center": {"geo": {"lat": latitude, "lon": longitude}},
+                "adjustment_type": detection["adjusted_detection"][
+                    "adjustment_method"
+                ],
+                "adjusted_at": datetime.utcnow(),
             }
-            points_to_return = adjusted_points
 
-        # Atualiza MongoDB com todos os dados
-        await mongo_db.update_detection(doc_id, update_data)
+        await mongo_db.update_detection(doc_id, detection_result)
 
-        # Retorna os pontos ajustados se disponíveis, senão os originais
-        return {"id": doc_id, "status": "success", "points": points_to_return}
+        return {
+            "id": doc_id,
+            "status": "success",
+            "points": (
+                detection_result["detection_result"]["adjusted_mask"]["points"]
+                if "adjusted_mask" in detection_result["detection_result"]
+                else detection_result["detection_result"]["mask_points"]
+            ),
+        }
 
     except Exception as e:
         return {

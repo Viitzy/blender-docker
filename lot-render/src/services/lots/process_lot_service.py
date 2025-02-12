@@ -43,8 +43,7 @@ async def process_lot_service(
     Service that processes a lot based on its polygon points.
     """
     try:
-        # Initialize services
-        mongo_db = MongoDB()
+        # Get MongoDB connection string from environment
         mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING")
         if not mongo_connection_string:
             return {
@@ -53,46 +52,44 @@ async def process_lot_service(
                 "error": "MongoDB connection string not found in environment variables",
             }
 
-        # Get the document from MongoDB
+        mongo_db = MongoDB()
         doc = await mongo_db.get_detection(doc_id)
+
         if not doc:
             return {
                 "id": doc_id,
                 "status": "error",
-                "error": "Document not found in MongoDB",
+                "error": "Document not found",
             }
-
-        # Verify if we have the satellite image URL
-        if not doc.get("satellite_image_url"):
-            return {
-                "id": doc_id,
-                "status": "error",
-                "error": "Satellite image URL not found in document",
-            }
-
-        # Create initial data for processing
-        initial_data = {
-            "id": doc_id,
-            "point_colors": {
-                "points_lat_lon": [[p.lat, p.lon] for p in points]
-            },
-        }
 
         # Calculate area
         points_lat_lon = [[p.lat, p.lon] for p in points]
         area_m2 = calculate_geo_area(points_lat_lon)
 
-        # Update MongoDB with area
-        await mongo_db.update_detection(
-            doc_id,
-            {
-                "area_m2": area_m2,
+        # Initialize lot_details structure
+        lot_details = {
+            "area_m2": area_m2,
+            "point_colors": {
+                "points": [],
+                "colors": [],
+                "colors_adjusted": [],
                 "points_lat_lon": points_lat_lon,
+                "points_utm": [],
+                "cardinal_points": {},
+                "front_points": [],
+                "front_points_lat_lon": [],
+                "street_points": [],
+                "street_info": {},
             },
-        )
+            "elevations": [],
+            "mask_elevation": [],
+            "mask_utm": [],
+        }
+
+        # Update MongoDB with initial lot_details
+        await mongo_db.update_detection(doc_id, {"lot_details": lot_details})
 
         # Process colors
-        print(f"\nProcessing colors for document: {doc_id}")
         colors_processed = process_lot_colors(
             mongodb_uri=mongo_connection_string,
             max_points=130,
@@ -102,146 +99,146 @@ async def process_lot_service(
             doc_id=doc_id,
         )
 
-        if colors_processed and len(colors_processed) > 0:
+        if colors_processed:
             point_colors = colors_processed[0].get("point_colors", {})
-            print(f"Colors processed successfully: {point_colors}")
+            lot_details["point_colors"].update(point_colors)
+
+            # Update MongoDB with processed colors
             await mongo_db.update_detection(
-                doc_id, {"point_colors": point_colors}
+                doc_id,
+                {"lot_details.point_colors": lot_details["point_colors"]},
             )
 
-            # Process site images
-            print("\nProcessing site images...")
-            watermark_path = (
-                Path(__file__).parent.parent.parent.parent
-                / "assets"
-                / "watermark.png"
-            )
-            site_images_processed = process_lot_images_for_site(
-                mongodb_uri=mongo_connection_string,
-                hex_color="#e8f34e",
-                watermark_path=str(watermark_path),
-                doc_id=doc_id,
-                confidence=confidence,
-            )
+        # Process site images
+        watermark_path = (
+            Path(__file__).parent.parent.parent.parent
+            / "assets"
+            / "watermark.png"
+        )
+        site_images_processed = process_lot_images_for_site(
+            mongodb_uri=mongo_connection_string,
+            hex_color="#e8f34e",
+            watermark_path=str(watermark_path),
+            doc_id=doc_id,
+            confidence=confidence,
+        )
 
-            if site_images_processed and len(site_images_processed) > 0:
-                site_image = site_images_processed[0]
-                site_image_url = site_image.get("site_image_url")
-                if site_image_url:
-                    print(f"Site image processed and saved: {site_image_url}")
-                    await mongo_db.update_detection(
-                        doc_id, {"site_image_url": site_image_url}
-                    )
-                else:
-                    print("No site image URL returned from processing")
-            else:
-                print("No site images were processed")
+        if site_images_processed:
+            site_image = site_images_processed[0]
+            if site_image.get("site_image_url"):
+                await mongo_db.update_detection(
+                    doc_id,
+                    {
+                        "image_info.image_thumb_site": site_image[
+                            "site_image_url"
+                        ]
+                    },
+                )
 
-            # # Process elevations
-            # elevations_processed = process_lots_elevation(
-            #     mongodb_uri=mongo_db.connection_string,
-            #     api_key=google_maps.api_key,
-            #     doc_id=doc_id,
-            #     confidence=confidence,
-            # )
+        # # Process elevations
+        # elevations_processed = process_lots_elevation(
+        #     mongodb_uri=mongo_db.connection_string,
+        #     api_key=google_maps.api_key,
+        #     doc_id=doc_id,
+        #     confidence=confidence,
+        # )
 
-            # if elevations_processed:
-            #     doc = elevations_processed[0]  # Get updated document
+        # if elevations_processed:
+        #     doc = elevations_processed[0]  # Get updated document
 
-            #     # Process UTM coordinates
-            #     utm_processed = process_lots_utm_coordinates(
-            #         mongodb_uri=mongo_db.connection_string,
-            #         doc_id=doc_id,
-            #         confidence=confidence,
-            #     )
+        #     # Process UTM coordinates
+        #     utm_processed = process_lots_utm_coordinates(
+        #         mongodb_uri=mongo_db.connection_string,
+        #         doc_id=doc_id,
+        #         confidence=confidence,
+        #     )
 
-            #     if utm_processed:
-            #         doc = utm_processed[0]  # Get updated document
+        #     if utm_processed:
+        #         doc = utm_processed[0]  # Get updated document
 
-            #         # Process cardinal points
-            #         cardinal_processed = process_cardinal_points(
-            #             mongodb_uri=mongo_db.connection_string,
-            #             distance_meters=5,
-            #             doc_id=doc_id,
-            #             confidence=confidence,
-            #         )
+        #         # Process cardinal points
+        #         cardinal_processed = process_cardinal_points(
+        #             mongodb_uri=mongo_db.connection_string,
+        #             distance_meters=5,
+        #             doc_id=doc_id,
+        #             confidence=confidence,
+        #         )
 
-            #         if cardinal_processed:
-            #             point_colors = cardinal_processed[0].get(
-            #                 "point_colors", {}
-            #             )
-            #             await mongo_db.update_detection(
-            #                 doc_id, {"point_colors": point_colors}
-            #             )
+        #         if cardinal_processed:
+        #             point_colors = cardinal_processed[0].get(
+        #                 "point_colors", {}
+        #             )
+        #             await mongo_db.update_detection(
+        #                 doc_id, {"point_colors": point_colors}
+        #             )
 
-            #             # Process front points
-            #             front_processed = process_front_points(
-            #                 mongodb_uri=mongo_db.connection_string,
-            #                 google_maps_api_key=google_maps.api_key,
-            #                 create_maps=False,
-            #                 doc_id=doc_id,
-            #                 confidence=confidence,
-            #             )
+        #             # Process front points
+        #             front_processed = process_front_points(
+        #                 mongodb_uri=mongo_db.connection_string,
+        #                 google_maps_api_key=google_maps.api_key,
+        #                 create_maps=False,
+        #                 doc_id=doc_id,
+        #                 confidence=confidence,
+        #             )
 
-            #             if front_processed:
-            #                 point_colors = front_processed[0].get(
-            #                     "point_colors", {}
-            #                 )
-            #                 await mongo_db.update_detection(
-            #                     doc_id, {"point_colors": point_colors}
-            #                 )
+        #             if front_processed:
+        #                 point_colors = front_processed[0].get(
+        #                     "point_colors", {}
+        #                 )
+        #                 await mongo_db.update_detection(
+        #                     doc_id, {"point_colors": point_colors}
+        #                 )
 
-            #                 # Process CSV
-            #                 csv_processed = process_lots_csv(
-            #                     mongodb_uri=mongo_db.connection_string,
-            #                     bucket_name="gethome-lots",
-            #                     year=str(datetime.now().year),
-            #                     doc_id=doc_id,
-            #                     confidence=confidence,
-            #                 )
+        #                 # Process CSV
+        #                 csv_processed = process_lots_csv(
+        #                     mongodb_uri=mongo_db.connection_string,
+        #                     bucket_name="gethome-lots",
+        #                     year=str(datetime.now().year),
+        #                     doc_id=doc_id,
+        #                     confidence=confidence,
+        #                 )
 
-            #                 if csv_processed:
-            #                     # TODO: Upload CSV to cloud storage and update MongoDB with URL
-            #                     csv_url = f"csv_url_for_{doc_id}"  # Placeholder
-            #                     await mongo_db.update_detection(
-            #                         doc_id, {"csv_elevation_colors": csv_url}
-            #                     )
+        #                 if csv_processed:
+        #                     # TODO: Upload CSV to cloud storage and update MongoDB with URL
+        #                     csv_url = f"csv_url_for_{doc_id}"  # Placeholder
+        #                     await mongo_db.update_detection(
+        #                         doc_id, {"csv_elevation_colors": csv_url}
+        #                     )
 
-            #                     # Process GLB (only if CSV was processed)
-            #                     if doc.get("csv_elevation_colors"):
-            #                         glb_processed = process_lots_glb(
-            #                             input_data=csv_processed[0],
-            #                             confidence=confidence,
-            #                         )
+        #                     # Process GLB (only if CSV was processed)
+        #                     if doc.get("csv_elevation_colors"):
+        #                         glb_processed = process_lots_glb(
+        #                             input_data=csv_processed[0],
+        #                             confidence=confidence,
+        #                         )
 
-            #                         if glb_processed:
-            #                             # TODO: Upload GLB to cloud storage and update MongoDB with URL
-            #                             glb_url = f"glb_url_for_{doc_id}"  # Placeholder
-            #                             await mongo_db.update_detection(
-            #                                 doc_id,
-            #                                 {"glb_elevation_file": glb_url},
-            #                             )
+        #                         if glb_processed:
+        #                             # TODO: Upload GLB to cloud storage and update MongoDB with URL
+        #                             glb_url = f"glb_url_for_{doc_id}"  # Placeholder
+        #                             await mongo_db.update_detection(
+        #                                 doc_id,
+        #                                 {"glb_elevation_file": glb_url},
+        #                             )
 
-            #                             # Process slope
-            #                             slope_processed = process_lots_slope(
-            #                                 mongodb_uri=mongo_db.connection_string,
-            #                                 year=str(datetime.now().year),
-            #                                 doc_id=doc_id,
-            #                                 confidence=confidence,
-            #                             )
+        #                             # Process slope
+        #                             slope_processed = process_lots_slope(
+        #                                 mongodb_uri=mongo_db.connection_string,
+        #                                 year=str(datetime.now().year),
+        #                                 doc_id=doc_id,
+        #                                 confidence=confidence,
+        #                             )
 
-            #                             if slope_processed:
-            #                                 slope_data = slope_processed[0].get(
-            #                                     "slope_info", {}
-            #                                 )
-            #                                 await mongo_db.update_detection(
-            #                                     doc_id,
-            #                                     {"slope_classify": slope_data},
-            #                                 )
+        #                             if slope_processed:
+        #                                 slope_data = slope_processed[0].get(
+        #                                     "slope_info", {}
+        #                                 )
+        #                                 await mongo_db.update_detection(
+        #                                     doc_id,
+        #                                     {"slope_classify": slope_data},
+        #                                 )
 
-        # Get final document and convert ObjectId to string
+        # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
-        final_doc = convert_objectid_to_string(final_doc)
 
         return {"id": doc_id, "status": "success", "results": final_doc}
 
