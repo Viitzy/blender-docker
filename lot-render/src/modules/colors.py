@@ -141,7 +141,7 @@ def process_lot_colors(
     try:
         # Conecta ao MongoDB com os nomes corretos do banco e collection
         client = MongoClient(mongodb_uri)
-        db = client["gethome-01-hmg"]  # Nome correto do banco
+        db = client["gethome-01-hml"]  # Nome correto do banco
         collection = db[
             "lots_detections_details_hmg"
         ]  # Nome correto da collection
