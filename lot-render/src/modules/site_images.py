@@ -197,16 +197,36 @@ def process_lot_images_for_site(
                         mask_points, image.shape[:2]
                     )
                 elif isinstance(mask_points, list):
+                    height, width = image.shape[:2]
                     if len(mask_points) > 0 and isinstance(
                         mask_points[0], list
                     ):
-                        pts = np.array(mask_points, dtype=np.int32)
+                        pts = np.array(mask_points, dtype=np.float32)
+                        # Se os pontos parecem normalizados (max <= 1.5), escalar
+                        if np.max(pts) <= 1.5:
+                            pts[:, 0] *= width
+                            pts[:, 1] *= height
+                        pts = pts.astype(np.int32)
+                        pts = pts.reshape((-1, 1, 2))
                         contours = [pts]
                     else:
                         pts = []
+                        # Verifica se o primeiro valor parece normalizado
+                        scale = True if float(mask_points[0]) <= 1.5 else False
                         for i in range(0, len(mask_points), 2):
-                            pts.append([mask_points[i], mask_points[i + 1]])
+                            x = (
+                                float(mask_points[i]) * width
+                                if scale
+                                else float(mask_points[i])
+                            )
+                            y = (
+                                float(mask_points[i + 1]) * height
+                                if scale
+                                else float(mask_points[i + 1])
+                            )
+                            pts.append([x, y])
                         pts = np.array(pts, dtype=np.int32)
+                        pts = pts.reshape((-1, 1, 2))
                         contours = [pts]
                 else:
                     print("Formato desconhecido para a máscara")
