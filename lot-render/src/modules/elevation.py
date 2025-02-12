@@ -177,9 +177,8 @@ def process_lots_elevation(
     try:
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
-
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
         # Monta a query base
         query = {
             "point_colors.points_lat_lon": {"$exists": True},
