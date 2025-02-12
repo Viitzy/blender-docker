@@ -74,9 +74,6 @@ async def detect_lot_service(
             # Upload to GCS
             blob.upload_from_filename(temp_file.name)
 
-            # Make the blob publicly accessible
-            blob.make_public()
-
             # Generate public URL
             satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
 

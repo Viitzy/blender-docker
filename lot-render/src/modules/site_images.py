@@ -261,9 +261,6 @@ def process_lot_images_for_site(
                     blob = bucket.blob(site_blob_path)
                     blob.upload_from_filename(temp_path)
 
-                    # Make the blob publicly accessible
-                    blob.make_public()
-
                     # Gera URL pública com link direto
                     site_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{site_blob_path}"
 
