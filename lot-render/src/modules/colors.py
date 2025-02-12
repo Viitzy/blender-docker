@@ -388,19 +388,42 @@ def process_lot_colors(
         ):
             points_array = points_array[0]
 
-        # Convert normalized points to pixel coordinates, recursively unwrapping nested coordinate values if needed
-        polygon_points = []
-        for point in points_array:
-            x, y = point
-            while isinstance(x, list):
-                x = x[0]
-            while isinstance(y, list):
-                y = y[0]
-            x_pixel = int(float(x) * width)
-            y_pixel = int(float(y) * height)
-            polygon_points.append([x_pixel, y_pixel])
+        # Helper function to unwrap nested values
+        def unwrap_value(val):
+            # Recursively unwrap nested lists if there's a single element; return 0 if empty
+            while isinstance(val, list):
+                if len(val) == 0:
+                    print(
+                        "WARNING: encountered empty list in coordinate unwrapping, defaulting to 0"
+                    )
+                    return 0
+                if len(val) == 1:
+                    val = val[0]
+                else:
+                    break
+            return val
 
+        # Convert normalized points to pixel coordinates
+        polygon_points = []
+        if points_array and isinstance(points_array[0], list):
+            # points_array is list of lists (nested coordinates)
+            for point in points_array:
+                if isinstance(point, list) and len(point) >= 2:
+                    x = unwrap_value(point[0])
+                    y = unwrap_value(point[1])
+                    x_pixel = int(float(x) * width)
+                    y_pixel = int(float(y) * height)
+                    polygon_points.append([x_pixel, y_pixel])
+        else:
+            # points_array is a flat list: [x1, y1, x2, y2, ...]
+            for i in range(0, len(points_array), 2):
+                x_pixel = int(float(points_array[i]) * width)
+                y_pixel = int(float(points_array[i + 1]) * height)
+                polygon_points.append([x_pixel, y_pixel])
+
+        print("DEBUG: polygon_points:", polygon_points)
         pts = np.array(polygon_points, dtype=np.int32).reshape((-1, 1, 2))
+        print("DEBUG: pts shape:", pts.shape)
         cv2.fillPoly(mask, [pts], 1)
 
         # Generate internal points
