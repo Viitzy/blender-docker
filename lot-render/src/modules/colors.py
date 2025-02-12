@@ -141,15 +141,17 @@ def process_lot_colors(
     try:
         # Conecta ao MongoDB com os nomes corretos do banco e collection
         client = MongoClient(mongodb_uri)
-        db = client["gethome-01"]  # Nome correto do banco
-        collection = db["lots_coords"]  # Nome correto da collection
+        db = client["gethome-01-hmg"]  # Nome correto do banco
+        collection = db[
+            "lots_detections_details_hmg"
+        ]  # Nome correto da collection
 
         if doc_id:
             print(f"\nVerificando existência do documento {doc_id}")
             try:
                 query = {"_id": ObjectId(doc_id)}
                 print(f"Query de busca: {query}")
-                print(f"Database: gethome-01")
+                print(f"Database: gethome-01-hmg")
                 print(f"Collection: lots_coords")
 
                 doc = collection.find_one(query)
