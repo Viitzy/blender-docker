@@ -74,13 +74,16 @@ async def detect_lot_service(
             # Upload to GCS
             blob.upload_from_filename(temp_file.name)
 
-            # Generate URL with new bucket name and correct path
-            satellite_image_url = f"gs://images_from_have_allotment/{blob_path}"
+            # Make the blob publicly accessible
+            blob.make_public()
+
+            # Generate public URL
+            satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
 
             # Delete temporary file
             os.unlink(temp_file.name)
 
-        # Update MongoDB with image URL instead of content
+        # Update MongoDB with the public URL
         await mongo_db.update_detection(
             doc_id, {"satellite_image_url": satellite_image_url}
         )

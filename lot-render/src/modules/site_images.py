@@ -261,10 +261,11 @@ def process_lot_images_for_site(
                     blob = bucket.blob(site_blob_path)
                     blob.upload_from_filename(temp_path)
 
-                    # Gera URL pública com o novo nome do bucket
-                    site_image_url = (
-                        f"gs://images_from_have_allotment/{site_blob_path}"
-                    )
+                    # Make the blob publicly accessible
+                    blob.make_public()
+
+                    # Gera URL pública com link direto
+                    site_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{site_blob_path}"
 
                     # Atualiza MongoDB
                     collection.update_one(
