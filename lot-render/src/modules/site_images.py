@@ -176,18 +176,41 @@ def process_lot_images_for_site(
                             interpolation=cv2.INTER_LANCZOS4,
                         )
 
-                # Prepara o contorno usando a anotação ajustada se disponível
-                mask_annotation = doc.get("adjusted_detection", {}).get(
-                    "annotation"
-                ) or doc.get("original_detection", {}).get("annotation")
-                if not mask_annotation:
+                # Obtém os pontos da máscara a partir do novo formato
+                mask_points = None
+                if doc.get("detection_result"):
+                    if "adjusted_mask" in doc["detection_result"] and doc[
+                        "detection_result"
+                    ]["adjusted_mask"].get("points"):
+                        mask_points = doc["detection_result"][
+                            "adjusted_mask"
+                        ].get("points")
+                    else:
+                        mask_points = doc["detection_result"].get("mask_points")
+                if not mask_points:
                     print("Nenhuma anotação de máscara encontrada")
                     continue
 
-                # Converte anotação em contornos
-                contours = yolov8_annotation_to_contours(
-                    mask_annotation, image.shape[:2]
-                )
+                # Converte os pontos da máscara para contornos
+                if isinstance(mask_points, str):
+                    contours = yolov8_annotation_to_contours(
+                        mask_points, image.shape[:2]
+                    )
+                elif isinstance(mask_points, list):
+                    if len(mask_points) > 0 and isinstance(
+                        mask_points[0], list
+                    ):
+                        pts = np.array(mask_points, dtype=np.int32)
+                        contours = [pts]
+                    else:
+                        pts = []
+                        for i in range(0, len(mask_points), 2):
+                            pts.append([mask_points[i], mask_points[i + 1]])
+                        pts = np.array(pts, dtype=np.int32)
+                        contours = [pts]
+                else:
+                    print("Formato desconhecido para a máscara")
+                    continue
 
                 # Aplica apenas o contorno
                 processed_image = draw_segment_with_watermark(
