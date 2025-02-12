@@ -116,10 +116,16 @@ def calculate_lot_area(doc: dict) -> float:
     """
     center_lat = doc["latitude"]
     center_lon = doc["longitude"]
-    zoom = doc.get("zoom") or extract_zoom(doc["image_url"])
-    width, height = map(int, doc["dimensions"].split("x"))
+    zoom = doc.get("zoom", 20)  # Default para 20 se não especificado
+    width = height = 1280  # Dimensões fixas da imagem
 
-    points_str = doc["adjusted_yolov8_annotation"].split()[1:]
+    # Tenta usar a detecção ajustada primeiro, se não existir usa a original
+    if "adjusted_detection" in doc:
+        annotation = doc["adjusted_detection"]["annotation"]
+    else:
+        annotation = doc["yolov8_annotation"]
+
+    points_str = annotation.split()[1:]
     geo_points = []
 
     for i in range(0, len(points_str), 2):
