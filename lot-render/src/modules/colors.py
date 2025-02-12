@@ -260,7 +260,16 @@ def process_lot_colors(
             # Cria máscara do polígono
             print("Gerando máscara do polígono...")
             mask = np.zeros((height, width), dtype=np.uint8)
-            points = doc["adjusted_yolov8_annotation"].split()[1:]
+
+            # Tenta usar a detecção ajustada primeiro, se não existir usa a original
+            if "adjusted_detection" in doc:
+                print("Usando detecção ajustada...")
+                annotation = doc["adjusted_detection"]["annotation"]
+            else:
+                print("Usando detecção original...")
+                annotation = doc["yolov8_annotation"]
+
+            points = annotation.split()[1:]
             polygon_points = []
 
             for i in range(0, len(points), 2):
@@ -312,7 +321,9 @@ def process_lot_colors(
                     pixel_y=y,
                     center_lat=doc["latitude"],
                     center_lon=doc["longitude"],
-                    zoom=doc.get("zoom") or extract_zoom(doc["image_url"]),
+                    zoom=doc.get(
+                        "zoom", 20
+                    ),  # Default para 20 se não especificado
                     scale=2,
                     image_width=width,
                     image_height=height,
