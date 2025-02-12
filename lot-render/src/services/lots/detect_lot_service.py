@@ -16,6 +16,7 @@ async def detect_lot_service(
     latitude: float,
     longitude: float,
     zoom: int = 20,
+    object_id: str = None,
     confidence: float = 0.62,
     year: str = None,
 ) -> Dict[str, Any]:
