@@ -119,6 +119,22 @@ async def detect_lot_service(
 
         # Update detection results
         detection = processed_docs[0]
+
+        # Convert normalized pixel coordinates to lat/lon points for original mask
+        original_points = []
+        for x, y in detection["original_detection"]["polygon"]:
+            lat, lon = pixel_to_latlon(
+                pixel_x=x * 1280,
+                pixel_y=y * 1280,
+                center_lat=latitude,
+                center_lon=longitude,
+                zoom=zoom,
+                scale=2,
+                image_width=1280,
+                image_height=1280,
+            )
+            original_points.append([lat, lon])
+
         detection_result = {
             "detection_result": {
                 "center": {
@@ -130,14 +146,30 @@ async def detect_lot_service(
                 },
                 "confidence": detection["confidence"],
                 "mask_points": detection["original_detection"]["polygon"],
+                "geo_points": original_points,
                 "processed_at": datetime.utcnow(),
             }
         }
 
         if "adjusted_detection" in detection:
+            # Convert normalized pixel coordinates to lat/lon points for adjusted mask
+            adjusted_geo_points = []
+            for x, y in detection["adjusted_detection"]["polygon"]:
+                lat, lon = pixel_to_latlon(
+                    pixel_x=x * 1280,
+                    pixel_y=y * 1280,
+                    center_lat=latitude,
+                    center_lon=longitude,
+                    zoom=zoom,
+                    scale=2,
+                    image_width=1280,
+                    image_height=1280,
+                )
+                adjusted_geo_points.append([lat, lon])
+
             detection_result["detection_result"]["adjusted_mask"] = {
                 "points": detection["adjusted_detection"]["polygon"],
-                "geo_points": [],  # Will be filled with converted coordinates
+                "geo_points": adjusted_geo_points,
                 "center": {"geo": {"lat": latitude, "lon": longitude}},
                 "adjustment_type": detection["adjusted_detection"][
                     "adjustment_method"
