@@ -373,8 +373,19 @@ def process_lot_colors(
         else:
             points_array = doc.get("yolov8_annotation", [])
 
+        # After retrieving points_array in process_lot_colors, add conversion if it's a numpy array
+        if not points_array:
+            points_array = []
+        elif isinstance(points_array, np.ndarray):
+            points_array = points_array.tolist()
+
         # Flatten points_array if it is nested (e.g., [[x, y], [x, y], ...] vs [[[x, y], [x, y], ...]])
-        if points_array and isinstance(points_array[0][0], list):
+        if (
+            points_array
+            and isinstance(points_array[0], list)
+            and len(points_array[0]) > 0
+            and isinstance(points_array[0][0], list)
+        ):
             points_array = points_array[0]
 
         # Convert normalized points to pixel coordinates, recursively unwrapping nested coordinate values if needed
