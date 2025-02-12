@@ -150,6 +150,11 @@ def process_lot_colors(
             try:
                 doc_object_id = ObjectId(doc_id)
                 doc = collection.find_one({"_id": doc_object_id})
+                print(f"Documento encontrado: {doc}")
+                query = {"_id": ObjectId(doc_id)}
+                print(f"Query de busca: {query}")
+                doc = collection.find_one(query)
+                print(f"Documento encontrado: {doc}")
                 if doc:
                     print("Documento encontrado!")
                     print(
