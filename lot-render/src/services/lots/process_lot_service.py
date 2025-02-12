@@ -45,7 +45,6 @@ async def process_lot_service(
     try:
         # Initialize services
         mongo_db = MongoDB()
-        google_maps = GoogleMapsAPI()
         mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING")
         if not mongo_connection_string:
             return {
@@ -54,7 +53,7 @@ async def process_lot_service(
                 "error": "MongoDB connection string not found in environment variables",
             }
 
-        # Get the document from MongoDB to get latitude and longitude
+        # Get the document from MongoDB
         doc = await mongo_db.get_detection(doc_id)
         if not doc:
             return {
@@ -63,16 +62,12 @@ async def process_lot_service(
                 "error": "Document not found in MongoDB",
             }
 
-        # Get latitude and longitude from metadata
-        metadata = doc.get("metadata", {})
-        latitude = metadata.get("latitude")
-        longitude = metadata.get("longitude")
-
-        if not latitude or not longitude:
+        # Verify if we have the satellite image URL
+        if not doc.get("satellite_image_url"):
             return {
                 "id": doc_id,
                 "status": "error",
-                "error": "Latitude and longitude not found in document metadata",
+                "error": "Satellite image URL not found in document",
             }
 
         # Create initial data for processing
@@ -113,6 +108,7 @@ async def process_lot_service(
             )
 
             # Process site images
+            print("\nProcessing site images...")
             watermark_path = (
                 Path(__file__).parent.parent.parent.parent
                 / "assets"
@@ -127,11 +123,18 @@ async def process_lot_service(
                 confidence=confidence,
             )
 
-            if site_images_processed:
+            if site_images_processed and len(site_images_processed) > 0:
                 site_image = site_images_processed[0]
-                await mongo_db.update_detection(
-                    doc_id, {"site_image_url": site_image.get("site_image_url")}
-                )
+                site_image_url = site_image.get("site_image_url")
+                if site_image_url:
+                    print(f"Site image processed and saved: {site_image_url}")
+                    await mongo_db.update_detection(
+                        doc_id, {"site_image_url": site_image_url}
+                    )
+                else:
+                    print("No site image URL returned from processing")
+            else:
+                print("No site images were processed")
 
             # # Process elevations
             # elevations_processed = process_lots_elevation(

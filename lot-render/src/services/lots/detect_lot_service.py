@@ -3,11 +3,13 @@ import os
 from datetime import datetime
 from typing import Dict, Any, List
 from bson import ObjectId
+import tempfile
 
 from ...apis.google_maps import GoogleMapsAPI
 from ...modules.detection import detect_lots_and_save
 from ...modules.pixel_to_geo import pixel_to_latlon
 from ...database.mongodb import MongoDB
+from google.cloud import storage
 
 
 async def detect_lot_service(
@@ -25,6 +27,8 @@ async def detect_lot_service(
         # Initialize services
         google_maps = GoogleMapsAPI()
         mongo_db = MongoDB()
+        storage_client = storage.Client()
+        bucket = storage_client.bucket("gethome-lots")
 
         # Load environment variables
         model_path = os.getenv("YOLO_MODEL_PATH")
@@ -56,10 +60,35 @@ async def detect_lot_service(
             scale=2,
         )
 
+        # Save image to GCS
+        blob_path = f"satellite_images/{doc_id}.jpg"
+        blob = bucket.blob(blob_path)
+
+        # Create a temporary file to save the image
+        with tempfile.NamedTemporaryFile(
+            suffix=".jpg", delete=False
+        ) as temp_file:
+            temp_file.write(image_content)
+            temp_file.flush()
+
+            # Upload to GCS
+            blob.upload_from_filename(temp_file.name)
+
+            # Generate URL
+            satellite_image_url = f"gs://gethome-lots/{blob_path}"
+
+            # Delete temporary file
+            os.unlink(temp_file.name)
+
+        # Update MongoDB with image URL instead of content
+        await mongo_db.update_detection(
+            doc_id, {"satellite_image_url": satellite_image_url}
+        )
+
         # Prepare items list for detection
         items_list = [
             {
-                "image_content": image_content,
+                "image_content": image_content,  # Still need the content for detection
                 "object_id": initial_data["object_id"],
                 "latitude": latitude,
                 "longitude": longitude,

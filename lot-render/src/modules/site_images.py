@@ -153,26 +153,26 @@ def process_lot_images_for_site(
     print(f"Filtro de confiança: >= {confidence}")
 
     client = None
+    storage_client = None
     try:
-        # Inicializa cliente do GCS
+        # Initialize GCS
         storage_client = storage.Client()
         bucket = storage_client.bucket(bucket_name)
 
-        # Estabelece conexão com MongoDB
+        # Connect to MongoDB
         client = MongoClient(mongodb_uri)
         db = client.gethome
         collection = db.lots_coords
 
-        # Monta a query base
+        # Base query
         query = {
             "site_image_url": {"$exists": False},
+            "satellite_image_url": {"$exists": True},
             "confidence": {"$gte": confidence},
         }
 
-        # Se foi especificado um ID, adiciona à query
         if doc_id:
             query["_id"] = ObjectId(doc_id)
-            print(f"Processando documento específico: {doc_id}")
 
         total_docs = collection.count_documents(query)
         print(f"Total de documentos para processar: {total_docs}")
@@ -186,26 +186,43 @@ def process_lot_images_for_site(
         for doc in collection.find(query):
             try:
                 doc_id = str(doc["_id"])
-                print(f"\nProcessando documento: {doc_id}")
+                satellite_image_url = doc.get("satellite_image_url")
 
-                # Obtém a imagem original do satélite
-                image_content = doc.get("satellite_image")
-                if not image_content:
-                    print("Imagem do satélite não encontrada")
+                if not satellite_image_url:
+                    print("URL da imagem do satélite não encontrada")
                     continue
 
-                # Converte bytes para numpy array
-                nparr = np.frombuffer(image_content, np.uint8)
-                image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                if image is None:
-                    print("Falha ao decodificar a imagem")
-                    continue
+                # # Converte bytes para numpy array
+                # nparr = np.frombuffer(image_content, np.uint8)
+                # image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                # if image is None:
+                #     print("Falha ao decodificar a imagem")
+                #     continue
+                # Extract bucket and blob path from gs:// URL
+                _, _, blob_path = satellite_image_url.partition("gethome-lots/")
 
-                # Redimensiona para 1280x1280 se necessário
-                if image.shape[:2] != (1280, 1280):
-                    image = cv2.resize(
-                        image, (1280, 1280), interpolation=cv2.INTER_LANCZOS4
-                    )
+                # Download to temporary file
+                with tempfile.NamedTemporaryFile(
+                    suffix=".jpg", delete=False
+                ) as temp_file:
+                    blob = bucket.blob(blob_path)
+                    blob.download_to_filename(temp_file.name)
+
+                    # Read image with OpenCV
+                    image = cv2.imread(temp_file.name)
+                    os.unlink(temp_file.name)
+
+                    if image is None:
+                        print("Falha ao decodificar a imagem")
+                        continue
+
+                    # Redimensiona para 1280x1280 se necessário
+                    if image.shape[:2] != (1280, 1280):
+                        image = cv2.resize(
+                            image,
+                            (1280, 1280),
+                            interpolation=cv2.INTER_LANCZOS4,
+                        )
 
                 # Prepara o contorno usando a anotação ajustada se disponível
                 mask_annotation = doc.get("adjusted_detection", {}).get(
@@ -289,3 +306,9 @@ def process_lot_images_for_site(
                 print("✅ Conexão com MongoDB fechada com sucesso")
             except Exception as e:
                 print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")
+        if storage_client:
+            try:
+                storage_client.close()
+                print("✅ Conexão com GCS fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com GCS: {e}")
