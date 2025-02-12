@@ -114,12 +114,14 @@ def calculate_lot_area(doc: dict) -> float:
     """
     Calcula a área do lote em metros quadrados usando as funções do pixel_to_geo.py
     """
-    center_lat = doc["latitude"]
-    center_lon = doc["longitude"]
-    zoom = doc.get("zoom", 20)  # Default para 20 se não especificado
-    width = height = 1280  # Dimensões fixas da imagem
+    # Get coordinates from new structure
+    center_lat = doc["coordinates"]["lat"]
+    center_lon = doc["coordinates"]["lon"]
+    zoom = doc["image_info"]["zoom"]
+    scale = doc["image_info"].get("scale", 2)  # default to 2 if not provided
+    width = height = 1280  # Fixed dimensions
 
-    # Tenta usar a detecção ajustada primeiro, se não existir usa a original
+    # Use adjusted annotation if available, otherwise the original
     if "adjusted_detection" in doc:
         annotation = doc["adjusted_detection"]["annotation"]
     else:
@@ -127,7 +129,6 @@ def calculate_lot_area(doc: dict) -> float:
 
     points_str = annotation.split()[1:]
     geo_points = []
-
     for i in range(0, len(points_str), 2):
         pixel_x = float(points_str[i]) * width
         pixel_y = float(points_str[i + 1]) * height
@@ -137,7 +138,7 @@ def calculate_lot_area(doc: dict) -> float:
             center_lat=center_lat,
             center_lon=center_lon,
             zoom=zoom,
-            scale=2,
+            scale=scale,
             image_width=width,
             image_height=height,
         )
