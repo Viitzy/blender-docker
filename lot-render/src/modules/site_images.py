@@ -159,8 +159,8 @@ def process_lot_images_for_site(
 
         # Connect to MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
         # Base query
         query = {
