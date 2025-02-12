@@ -147,14 +147,33 @@ async def detect_lot_service(
 
         await mongo_db.update_detection(doc_id, detection_result)
 
+        # Get points from detection result
+        points_array = (
+            detection_result["detection_result"]["adjusted_mask"]["points"]
+            if "adjusted_mask" in detection_result["detection_result"]
+            else detection_result["detection_result"]["mask_points"]
+        )
+
+        # Convert normalized pixel coordinates to lat/lon points
+        points = []
+        for x, y in points_array:
+            lat, lon = pixel_to_latlon(
+                pixel_x=x
+                * 1280,  # Convert normalized coordinates back to pixels
+                pixel_y=y * 1280,
+                center_lat=latitude,
+                center_lon=longitude,
+                zoom=zoom,
+                scale=2,
+                image_width=1280,
+                image_height=1280,
+            )
+            points.append({"lat": lat, "lon": lon})
+
         return {
             "id": doc_id,
             "status": "success",
-            "points": (
-                detection_result["detection_result"]["adjusted_mask"]["points"]
-                if "adjusted_mask" in detection_result["detection_result"]
-                else detection_result["detection_result"]["mask_points"]
-            ),
+            "points": points,
         }
 
     except Exception as e:
