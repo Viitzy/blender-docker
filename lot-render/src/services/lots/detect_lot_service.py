@@ -94,6 +94,7 @@ async def detect_lot_service(
         items_list = [
             {
                 "image_content": image_content,
+                "object_id": doc_id,
                 "latitude": latitude,
                 "longitude": longitude,
                 "dimensions": "1280x1280",
