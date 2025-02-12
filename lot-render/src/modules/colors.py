@@ -190,20 +190,10 @@ def process_lot_colors(
     bright_threshold: int = 215,
     confidence: float = 0.62,
 ) -> list:
-    """
-    Processa as cores do lote específico, adiciona coordenadas geográficas e corrige cores escuras e claras.
-
-    Args:
-        mongodb_uri (str): URI de conexão com MongoDB
-        doc_id (str): ID do documento para processar
-        max_points (int): Número máximo de pontos a serem gerados
-        dark_threshold (int): Limite para cores escuras
-        bright_threshold (int): Limite para cores claras
-        confidence (float): Valor mínimo de confiança
-    """
+    """Process lot colors."""
     print("\n=== Iniciando processamento de cores do lote ===")
     print(f"ID do documento: {doc_id}")
-    print(f"Parâmetros:")
+    print("Parâmetros:")
     print(f"- Máximo de pontos: {max_points}")
     print(f"- Threshold escuro: {dark_threshold}")
     print(f"- Threshold claro: {bright_threshold}")
@@ -211,177 +201,123 @@ def process_lot_colors(
 
     client = None
     try:
-        # Estabelece conexão com MongoDB
+        # Connect to MongoDB
         client = MongoClient(mongodb_uri)
         db = client["gethome-01-hml"]
         collection = db["lots_detections_details_hmg"]
 
-        # Busca o documento específico
-        doc = collection.find_one(
-            {
-                "_id": ObjectId(doc_id),
-                "confidence": {"$gte": confidence},
-                "satellite_image_url": {"$exists": True},
-            }
-        )
+        # Query para a nova estrutura
+        query = {
+            "_id": ObjectId(doc_id),
+            "detection_result": {"$exists": True},
+            "image_info.url": {"$exists": True},
+        }
 
+        doc = collection.find_one(query)
         if not doc:
             print(
                 f"Documento {doc_id} não encontrado ou não atende aos critérios"
             )
             return []
 
-        processed_docs = []
-        try:
-            print("\n--- Processando documento ---")
+        # Get image URL from new structure
+        image_url = doc["image_info"]["url"]
 
-            # Calcula ou obtém a área do lote
-            if "area_m2" not in doc:
-                area = calculate_lot_area(doc)
-                print(f"Área calculada: {area:.2f} m²")
-                collection.update_one(
-                    {"_id": doc["_id"]}, {"$set": {"area_m2": area}}
-                )
-                doc["area_m2"] = area
-            else:
-                area = doc["area_m2"]
-                print(f"Área existente: {area:.2f} m²")
+        # Get area from detection result
+        area = calculate_lot_area(doc)
 
-            # Baixa a imagem do bucket images_from_have_allotment
-            print("Baixando imagem...")
-            image = download_image_from_gcs(doc["satellite_image_url"])
-            if image is None:
-                print("Erro ao baixar imagem")
-                return []
+        # Download and process image
+        image = download_image_from_gcs(image_url)
+        if image is None:
+            print("Erro ao baixar imagem")
+            return []
 
-            height, width = image.shape[:2]
-            print(f"Dimensões da imagem: {width}x{height}")
+        height, width = image.shape[:2]
+        print(f"Dimensões da imagem: {width}x{height}")
 
-            # Cria máscara do polígono
-            print("Gerando máscara do polígono...")
-            mask = np.zeros((height, width), dtype=np.uint8)
+        # Create polygon mask using adjusted detection if available
+        print("Gerando máscara do polígono...")
+        mask = np.zeros((height, width), dtype=np.uint8)
 
-            # Tenta usar a detecção ajustada primeiro, se não existir usa a original
-            if "adjusted_detection" in doc:
-                print("Usando detecção ajustada...")
-                annotation = doc["adjusted_detection"]["annotation"]
-            else:
-                print("Usando detecção original...")
-                annotation = doc["yolov8_annotation"]
+        if "adjusted_mask" in doc["detection_result"]:
+            print("Usando detecção ajustada...")
+            points_array = doc["detection_result"]["adjusted_mask"]["points"]
+        else:
+            print("Usando detecção original...")
+            points_array = doc["detection_result"]["mask_points"]
 
-            points = annotation.split()[1:]
-            polygon_points = []
+        # Convert normalized points to pixel coordinates
+        polygon_points = []
+        for x, y in points_array:
+            x_pixel = int(x * width)
+            y_pixel = int(y * height)
+            polygon_points.append([x_pixel, y_pixel])
 
-            for i in range(0, len(points), 2):
-                x = float(points[i]) * width
-                y = float(points[i + 1]) * height
-                polygon_points.append([int(x), int(y)])
+        cv2.fillPoly(mask, [np.array(polygon_points)], 1)
 
-            cv2.fillPoly(mask, [np.array(polygon_points)], 1)
+        # Generate internal points
+        points_inside = get_points_inside_mask(mask, area, max_points)
 
-            # Gera pontos internos
-            print("Gerando pontos internos...")
-            points_inside = get_points_inside_mask(mask, area)
-            print(f"Pontos gerados: {len(points_inside)}")
+        # Process colors for points
+        colors = []
+        colors_adjusted = []
+        points_lat_lon = []
 
-            # Limita o número de pontos se necessário
-            if len(points_inside) > max_points:
-                print(
-                    f"Reduzindo número de pontos de {len(points_inside)} para {max_points}"
-                )
-                indices = np.linspace(
-                    0, len(points_inside) - 1, max_points, dtype=int
-                )
-                points_inside = [points_inside[i] for i in indices]
+        for point in points_inside:
+            # Get color from image
+            color = image[point[1], point[0]]
+            colors.append(color.tolist())
 
-            # Processa cores e coordenadas
-            print("Processando cores e coordenadas...")
-            colors = []
-            colors_rgb = []
-            normalized_points = []
-            geo_points = []
-
-            for x, y in points_inside:
-                bgr_color = image[y, x]
-                rgb_color = (
-                    int(bgr_color[2]),
-                    int(bgr_color[1]),
-                    int(bgr_color[0]),
-                )
-                hex_color = rgb_to_hex(rgb_color)
-                colors.append(hex_color)
-                colors_rgb.append(rgb_color)
-
-                normalized_points.append(
-                    [round(float(x) / width, 3), round(float(y) / height, 3)]
-                )
-
-                lat, lon = pixel_to_latlon(
-                    pixel_x=x,
-                    pixel_y=y,
-                    center_lat=doc["latitude"],
-                    center_lon=doc["longitude"],
-                    zoom=doc.get(
-                        "zoom", 20
-                    ),  # Default para 20 se não especificado
-                    scale=2,
-                    image_width=width,
-                    image_height=height,
-                )
-                geo_points.append([round(lat, 6), round(lon, 6)])
-
-            # Correção de cores
-            print("Aplicando correção de cores...")
-            df_colors = pd.DataFrame(colors_rgb, columns=["r", "g", "b"])
-            df_colors["x"] = [p[0] for p in normalized_points]
-            df_colors["y"] = [p[1] for p in normalized_points]
-            df_colors["z"] = 0
-
-            df_corrected = correct_colors(
-                df_colors,
-                dark_threshold=dark_threshold,
-                bright_threshold=bright_threshold,
+            # Adjust color if needed
+            adjusted_color = correct_color(
+                color, dark_threshold, bright_threshold
             )
+            colors_adjusted.append(adjusted_color)
 
-            colors_adjusted = []
-            for _, row in df_corrected.iterrows():
-                rgb = (int(row["r"]), int(row["g"]), int(row["b"]))
-                hex_color = rgb_to_hex(rgb)
-                colors_adjusted.append(hex_color)
+            # Convert point to lat/lon
+            lat, lon = pixel_to_latlon(
+                pixel_x=point[0],
+                pixel_y=point[1],
+                center_lat=doc["coordinates"]["lat"],
+                center_lon=doc["coordinates"]["lon"],
+                zoom=doc["image_info"]["zoom"],
+                scale=doc["image_info"]["scale"],
+                image_width=width,
+                image_height=height,
+            )
+            points_lat_lon.append([lat, lon])
 
-            # Atualiza MongoDB
-            print("Atualizando documento no MongoDB...")
-            point_colors = {
-                "points": normalized_points,
-                "colors": colors,
-                "colors_adjusted": colors_adjusted,
-                "points_lat_lon": geo_points,
+        # Update MongoDB
+        update_data = {
+            "lot_details": {
+                "area_m2": area,
+                "point_colors": {
+                    "points": points_inside,
+                    "colors": colors,
+                    "colors_adjusted": colors_adjusted,
+                    "points_lat_lon": points_lat_lon,
+                },
             }
+        }
 
-            result = collection.update_one(
-                {"_id": doc["_id"]},
-                {"$set": {"point_colors": point_colors}},
-            )
+        result = collection.update_one(
+            {"_id": ObjectId(doc_id)}, {"$set": update_data}
+        )
 
-            if result.modified_count > 0:
-                doc["point_colors"] = point_colors
-                processed_docs.append(doc)
-                print("Documento atualizado com sucesso!")
+        if result.modified_count > 0:
+            print(f"Documento {doc_id} atualizado com sucesso")
+            return [
+                {
+                    "id": str(doc["_id"]),
+                    "point_colors": update_data["lot_details"]["point_colors"],
+                }
+            ]
 
-        except Exception as e:
-            print(f"\nERRO ao processar documento {doc_id}: {str(e)}")
-            traceback.print_exc()
-
-        print("\n=== Resumo do processamento ===")
-        print(f"Documento processado: {doc_id}")
-        print(f"Status: {'Sucesso' if processed_docs else 'Falha'}")
-        print("==============================\n")
-
-        return processed_docs
+        return []
 
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
-        raise
+        return []
 
     finally:
         if client:

@@ -240,6 +240,10 @@ async def process_lot_service(
         # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
 
+        # Convert ObjectId to string before returning
+        if final_doc and "_id" in final_doc:
+            final_doc["_id"] = str(final_doc["_id"])
+
         return {"id": doc_id, "status": "success", "results": final_doc}
 
     except Exception as e:
