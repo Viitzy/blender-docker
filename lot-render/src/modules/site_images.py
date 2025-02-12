@@ -129,7 +129,6 @@ def yolov8_annotation_to_contours(annotation: str, image_shape: tuple) -> list:
 
 def process_lot_images_for_site(
     mongodb_uri: str,
-    bucket_name: str,
     hex_color: str,
     watermark_path: str,
     doc_id: str = None,
@@ -140,7 +139,6 @@ def process_lot_images_for_site(
 
     Args:
         mongodb_uri (str): URI de conexão com MongoDB
-        bucket_name (str): Nome do bucket no GCS
         hex_color (str): Cor em hexadecimal para a máscara
         watermark_path (str): Caminho para a imagem de marca d'água
         doc_id (str): ID específico do documento (opcional)
@@ -155,9 +153,9 @@ def process_lot_images_for_site(
     client = None
     storage_client = None
     try:
-        # Initialize GCS
+        # Initialize GCS with new bucket name
         storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
+        bucket = storage_client.bucket("images_from_have_allotment")
 
         # Connect to MongoDB
         client = MongoClient(mongodb_uri)
@@ -192,14 +190,14 @@ def process_lot_images_for_site(
                     print("URL da imagem do satélite não encontrada")
                     continue
 
-                # # Converte bytes para numpy array
-                # nparr = np.frombuffer(image_content, np.uint8)
-                # image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                # if image is None:
-                #     print("Falha ao decodificar a imagem")
-                #     continue
-                # Extract bucket and blob path from gs:// URL
-                _, _, blob_path = satellite_image_url.partition("gethome-lots/")
+                # Extract blob path from gs:// URL, now using the new bucket name
+                _, _, blob_path = satellite_image_url.partition(
+                    "images_from_have_allotment/"
+                )
+
+                # Ensure the blob path starts with satellite_images/
+                if not blob_path.startswith("satellite_images/"):
+                    blob_path = f"satellite_images/{blob_path}"
 
                 # Download to temporary file
                 with tempfile.NamedTemporaryFile(
@@ -258,13 +256,15 @@ def process_lot_images_for_site(
                     ]
                     cv2.imwrite(temp_path, processed_image, encode_params)
 
-                    # Upload para GCS
-                    blob_path = f"site_images/{doc_id}.jpg"
-                    blob = bucket.blob(blob_path)
+                    # Upload para GCS na pasta site_images
+                    site_blob_path = f"site_images/{doc_id}.jpg"
+                    blob = bucket.blob(site_blob_path)
                     blob.upload_from_filename(temp_path)
 
-                    # Gera URL pública
-                    site_image_url = f"gs://{bucket_name}/{blob_path}"
+                    # Gera URL pública com o novo nome do bucket
+                    site_image_url = (
+                        f"gs://images_from_have_allotment/{site_blob_path}"
+                    )
 
                     # Atualiza MongoDB
                     collection.update_one(

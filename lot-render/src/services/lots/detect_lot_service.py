@@ -28,7 +28,7 @@ async def detect_lot_service(
         google_maps = GoogleMapsAPI()
         mongo_db = MongoDB()
         storage_client = storage.Client()
-        bucket = storage_client.bucket("gethome-lots")
+        bucket = storage_client.bucket("images_from_have_allotment")
 
         # Load environment variables
         model_path = os.getenv("YOLO_MODEL_PATH")
@@ -60,7 +60,7 @@ async def detect_lot_service(
             scale=2,
         )
 
-        # Save image to GCS
+        # Save image to GCS in the correct path
         blob_path = f"satellite_images/{doc_id}.jpg"
         blob = bucket.blob(blob_path)
 
@@ -74,8 +74,8 @@ async def detect_lot_service(
             # Upload to GCS
             blob.upload_from_filename(temp_file.name)
 
-            # Generate URL
-            satellite_image_url = f"gs://gethome-lots/{blob_path}"
+            # Generate URL with new bucket name and correct path
+            satellite_image_url = f"gs://images_from_have_allotment/{blob_path}"
 
             # Delete temporary file
             os.unlink(temp_file.name)
