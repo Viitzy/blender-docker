@@ -23,75 +23,28 @@ def draw_segment_with_watermark(
     image: np.ndarray,
     contours: List,
     hex_color: str = "#e8f34e",
-    alpha: float = 0.5,
-    outline_alpha: float = 0.8,
-    watermark_path: str = None,
-    watermark_scale: float = 0.2,
+    outline_thickness: int = 4,
 ) -> np.ndarray:
     """
-    Draw segment with watermark on image.
+    Draw segment outline on image.
 
     Args:
         image: Input image
         contours: List of contours
-        hex_color: Hex color for segment
-        alpha: Segment transparency
-        outline_alpha: Outline transparency
-        watermark_path: Path to watermark image
-        watermark_scale: Scale factor for watermark
+        hex_color: Hex color for outline
+        outline_thickness: Thickness of the outline in pixels
 
     Returns:
-        Image with segment and watermark
+        Image with segment outline
     """
     # Create copy of image
     result = image.copy()
 
-    # Create mask for segment
-    mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, contours, -1, 255, -1)
-
-    # Create colored overlay
-    overlay = np.zeros_like(image)
+    # Convert hex color to BGR
     bgr_color = hex_to_bgr(hex_color)
-    overlay[mask > 0] = bgr_color
 
-    # Blend overlay with image
-    cv2.addWeighted(overlay, alpha, result, 1, 0, result)
-
-    # Draw contours
-    outline = np.zeros_like(image)
-    cv2.drawContours(outline, contours, -1, bgr_color, 2)
-    cv2.addWeighted(outline, outline_alpha, result, 1, 0, result)
-
-    # Add watermark if provided
-    if watermark_path and os.path.exists(watermark_path):
-        try:
-            # Load and resize watermark
-            watermark = cv2.imread(watermark_path, cv2.IMREAD_UNCHANGED)
-            if (
-                watermark is not None and watermark.shape[2] == 4
-            ):  # With alpha channel
-                h, w = image.shape[:2]
-                new_h = int(h * watermark_scale)
-                new_w = int(new_h * watermark.shape[1] / watermark.shape[0])
-                watermark = cv2.resize(watermark, (new_w, new_h))
-
-                # Position watermark at bottom right
-                y = h - new_h - 10
-                x = w - new_w - 10
-
-                # Extract alpha channel
-                alpha_channel = watermark[:, :, 3] / 255.0
-
-                # Blend watermark
-                for c in range(3):
-                    result[y : y + new_h, x : x + new_w, c] = (
-                        result[y : y + new_h, x : x + new_w, c]
-                        * (1 - alpha_channel)
-                        + watermark[:, :, c] * alpha_channel
-                    )
-        except Exception as e:
-            print(f"Error adding watermark: {str(e)}")
+    # Draw contours with specified thickness
+    cv2.drawContours(result, contours, -1, bgr_color, outline_thickness)
 
     return result
 
@@ -235,12 +188,12 @@ def process_lot_images_for_site(
                     mask_annotation, image.shape[:2]
                 )
 
-                # Aplica máscara e marca d'água
+                # Aplica apenas o contorno
                 processed_image = draw_segment_with_watermark(
                     image=image,
                     contours=contours,
                     hex_color=hex_color,
-                    watermark_path=watermark_path,
+                    outline_thickness=4,
                 )
 
                 # Salva temporariamente
