@@ -48,65 +48,37 @@ def calculate_geo_area(points: list) -> float:
 
 def calculate_lot_area(doc: dict) -> float:
     """
-    Calcula a área em metros quadrados do lote baseado na anotação YOLOv8.
-
-    Parameters:
-        doc: dict - Documento JSON contendo a detecção do lote
-
-    Returns:
-        float - Área em metros quadrados
+    Calcula a área do lote em metros quadrados usando as funções do pixel_to_geo.py
     """
-    # Obtém os dados necessários do documento
-    metadata = doc.get("metadata", {})
-    center_lat = metadata.get("latitude")
-    center_lon = metadata.get("longitude")
-    zoom = metadata.get("zoom")
-    dimensions = metadata.get("dimensions")
+    # Get coordinates from new structure
+    center_lat = doc["coordinates"]["lat"]
+    center_lon = doc["coordinates"]["lon"]
+    zoom = doc["image_info"]["zoom"]
+    width = height = 1280  # Dimensões fixas da imagem
 
-    if not all([center_lat, center_lon, zoom, dimensions]):
-        raise ValueError(
-            "Dados necessários não encontrados no metadata do documento"
-        )
-
-    # Extrai as dimensões da imagem
-    width, height = map(int, dimensions.split("x"))
-
-    # Usa a anotação ajustada se disponível, senão usa a original
-    if "adjusted_detection" in doc:
-        annotation = doc["adjusted_detection"]["annotation"]
+    # Get annotation from detection result
+    if "adjusted_mask" in doc["detection_result"]:
+        points_array = doc["detection_result"]["adjusted_mask"]["points"]
     else:
-        annotation = doc["original_detection"]["annotation"]
+        points_array = doc["detection_result"]["mask_points"]
 
-    if not annotation:
-        raise ValueError("Nenhuma anotação encontrada no documento")
-
-    # Converte a anotação YOLOv8 em pontos normalizados
-    points_str = annotation.split()[1:]  # Remove o primeiro elemento (classe)
-    points = []
-    for i in range(0, len(points_str), 2):
-        x = float(points_str[i]) * width
-        y = float(points_str[i + 1]) * height
-        points.append((x, y))
-
-    # Converte cada ponto para coordenadas geográficas
     geo_points = []
-    for pixel_x, pixel_y in points:
+    for x, y in points_array:
+        pixel_x = x * width
+        pixel_y = y * height
         lat, lon = pixel_to_latlon(
             pixel_x=pixel_x,
             pixel_y=pixel_y,
             center_lat=center_lat,
             center_lon=center_lon,
             zoom=zoom,
-            scale=2,  # Scale é sempre 2 para imagens de satélite
+            scale=2,
             image_width=width,
             image_height=height,
         )
         geo_points.append((lat, lon))
 
-    # Calcula a área usando a fórmula de Haversine
-    area = calculate_geo_area(geo_points)
-
-    return area
+    return calculate_geo_area(geo_points)
 
 
 def process_lot_areas(
