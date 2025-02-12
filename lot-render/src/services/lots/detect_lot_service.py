@@ -17,7 +17,6 @@ async def detect_lot_service(
     longitude: float,
     zoom: int = 20,
     confidence: float = 0.62,
-    object_id: str = None,
     year: str = None,
 ) -> Dict[str, Any]:
     """
@@ -94,7 +93,6 @@ async def detect_lot_service(
         items_list = [
             {
                 "image_content": image_content,
-                "object_id": initial_data["object_id"],
                 "latitude": latitude,
                 "longitude": longitude,
                 "dimensions": "1280x1280",
