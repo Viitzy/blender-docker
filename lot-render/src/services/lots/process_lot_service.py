@@ -43,6 +43,7 @@ async def process_lot_service(
     Service that processes a lot based on its polygon points.
     """
     try:
+        google_maps = GoogleMapsAPI()
         # Get MongoDB connection string from environment
         mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING")
         if not mongo_connection_string:
@@ -148,49 +149,43 @@ async def process_lot_service(
         #     doc = elevations_processed[0]  # Get updated document
         if True:
 
-            # Process UTM coordinates
-            utm_processed = process_lots_utm_coordinates(
+            # # Process UTM coordinates
+            # utm_processed = process_lots_utm_coordinates(
+            #     mongodb_uri=mongo_connection_string,
+            #     doc_id=doc_id,
+            #     confidence=confidence,
+            # )
+
+            # if utm_processed:
+            #     doc = utm_processed[0]  # Get updated document
+            #     print("utm_processed")
+
+            # Process cardinal points
+            cardinal_processed = process_cardinal_points(
                 mongodb_uri=mongo_connection_string,
+                distance_meters=5,
                 doc_id=doc_id,
                 confidence=confidence,
             )
 
-            if utm_processed:
-                doc = utm_processed[0]  # Get updated document
-                print("utm_processed")
+            if cardinal_processed:
+                doc = cardinal_processed[0]  # Get updated document
+                print("cardinal_points_processed")
 
-        #         # Process cardinal points
-        #         cardinal_processed = process_cardinal_points(
-        #             mongodb_uri=mongo_db.connection_string,
-        #             distance_meters=5,
-        #             doc_id=doc_id,
-        #             confidence=confidence,
-        #         )
+                # Process front points
+                # front_processed = process_front_points(
+                #     mongodb_uri=mongo_connection_string,
+                #     google_maps_api_key=google_maps.api_key,
+                #     create_maps=False,
+                #     doc_id=doc_id,
+                #     confidence=confidence,
+                # )
 
-        #         if cardinal_processed:
-        #             point_colors = cardinal_processed[0].get(
-        #                 "point_colors", {}
-        #             )
-        #             await mongo_db.update_detection(
-        #                 doc_id, {"point_colors": point_colors}
-        #             )
-
-        #             # Process front points
-        #             front_processed = process_front_points(
-        #                 mongodb_uri=mongo_db.connection_string,
-        #                 google_maps_api_key=google_maps.api_key,
-        #                 create_maps=False,
-        #                 doc_id=doc_id,
-        #                 confidence=confidence,
-        #             )
-
-        #             if front_processed:
-        #                 point_colors = front_processed[0].get(
-        #                     "point_colors", {}
-        #                 )
-        #                 await mongo_db.update_detection(
-        #                     doc_id, {"point_colors": point_colors}
-        #                 )
+                # if front_processed:
+                #     point_colors = front_processed[0].get("point_colors", {})
+                #     await mongo_db.update_detection(
+                #         doc_id, {"point_colors": point_colors}
+                #     )
 
         #                 # Process CSV
         #                 csv_processed = process_lots_csv(

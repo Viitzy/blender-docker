@@ -69,14 +69,16 @@ def process_cardinal_points(
     try:
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
-        # Prepara query
+        # Monta a query base
         query = {
-            "point_colors.points_lat_lon": {"$exists": True},
-            "point_colors.cardinal_points": {"$exists": False},
-            "confidence": {"$gte": confidence},
+            "$and": [
+                {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
+                {"lot_details.cardinal_points": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
         }
 
         # Se foi especificado um ID, adiciona à query
@@ -101,11 +103,15 @@ def process_cardinal_points(
                 print(f"Rua: {doc.get('street_name', 'N/A')}")
 
                 # Verifica se já tem point_colors
-                point_colors = doc.get("point_colors", {})
+                points_lat_lon = (
+                    doc.get("lot_details", {})
+                    .get("point_colors", {})
+                    .get("points_lat_lon", [])
+                )
 
                 # Calcula centro do polígono se houver pontos
-                if "points_lat_lon" in point_colors:
-                    points = np.array(point_colors["points_lat_lon"])
+                if points_lat_lon:
+                    points = np.array(points_lat_lon)
                     center_lat = np.mean(points[:, 0])
                     center_lon = np.mean(points[:, 1])
                     print(
@@ -127,16 +133,18 @@ def process_cardinal_points(
                 )
 
                 # Adiciona pontos cardeais ao point_colors
-                point_colors["cardinal_points"] = cardinal_points
+                # Atualiza documento com os pontos cardeais no novo formato
+                if "lot_details" not in doc:
+                    doc["lot_details"] = {}
 
                 # Atualiza documento
                 result = collection.update_one(
                     {"_id": doc["_id"]},
-                    {"$set": {"point_colors": point_colors}},
+                    {"$set": {"lot_details.cardinal_points": cardinal_points}},
                 )
 
                 if result.modified_count > 0:
-                    doc["point_colors"] = point_colors
+                    doc["lot_details"]["cardinal_points"] = cardinal_points
                     processed_docs.append(doc)
                     print("Documento atualizado com sucesso")
                     print("Pontos cardeais adicionados:")
