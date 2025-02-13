@@ -35,6 +35,8 @@ def convert_objectid_to_string(obj):
 async def process_lot_service(
     doc_id: str,
     points: List[Dict[str, float]],
+    zoom: int = 20,
+    confidence: float = 0.62,
 ) -> Dict[str, Any]:
     """
     Service that processes a lot based on its polygon points.
