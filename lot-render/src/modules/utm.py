@@ -66,10 +66,12 @@ def process_lots_utm_coordinates(
 
         # Monta a query base
         query = {
-            "lot_details.point_colors.points_lat_lon": {"$exists": True},
-            "lot_details.elevations": {"$exists": True},
-            "lot_details.points_utm": {"$exists": False},
-            "detection_result.confidence": {"$gte": confidence},
+            "$and": [
+                {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
+                {"lot_details.elevations": {"$exists": True}},
+                {"lot_details.points_utm": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
         }
 
         # Se foi especificado um ID ou google_place_id, adiciona à query
@@ -96,9 +98,13 @@ def process_lots_utm_coordinates(
                 print(f"ID: {doc['_id']}")
                 print(f"Rua: {doc.get('street_name', 'N/A')}")
 
-                # Obtém pontos lat/lon e elevações
-                points_lat_lon = doc["point_colors"]["points_lat_lon"]
-                elevations = doc["point_colors"]["lat_lon_elevation"]
+                # Obtém pontos lat/lon e elevações do novo formato
+                points_lat_lon = (
+                    doc.get("lot_details", {})
+                    .get("point_colors", {})
+                    .get("points_lat_lon", [])
+                )
+                elevations = doc.get("lot_details", {}).get("elevations", [])
 
                 if len(points_lat_lon) != len(elevations):
                     print(
@@ -146,17 +152,19 @@ def process_lots_utm_coordinates(
                         f"AVISO: Pontos em diferentes zonas UTM: {unique_zones}"
                     )
 
-                # Atualiza documento
-                point_colors = doc["point_colors"]
-                point_colors["points_utm"] = points_utm
+                # Atualiza documento com as coordenadas UTM no novo formato
+                if "lot_details" not in doc:
+                    doc["lot_details"] = {}
+                if "point_colors" not in doc["lot_details"]:
+                    doc["lot_details"]["point_colors"] = {}
 
                 result = collection.update_one(
                     {"_id": doc["_id"]},
-                    {"$set": {"point_colors": point_colors}},
+                    {"$set": {"lot_details.points_utm": points_utm}},
                 )
 
                 if result.modified_count > 0:
-                    doc["point_colors"] = point_colors
+                    doc["lot_details"]["points_utm"] = points_utm
                     processed_docs.append(doc)
                     print(f"Documento {doc['_id']} atualizado com sucesso")
 
