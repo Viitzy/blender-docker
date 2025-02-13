@@ -78,12 +78,32 @@ async def process_lot_service(
         # Convert Point objects to [lat, lon] format
         new_points_lat_lon = [[point.lat, point.lon] for point in points]
 
-        # If points are different, save the old ones with 'old_' prefix
+        # If points are different, save the old ones with 'old_' prefix and update center
         if original_points and original_points != new_points_lat_lon:
+            # Calculate center point for new points
+            new_center_lat = sum(p.lat for p in points) / len(points)
+            new_center_lon = sum(p.lon for p in points) / len(points)
+
             update_data = {
                 "detection_result.old_geo_points": original_points,
                 "detection_result.geo_points": new_points_lat_lon,
+                "detection_result.center.geo": {
+                    "lat": new_center_lat,
+                    "lon": new_center_lon,
+                },
             }
+
+            # If there was an existing center, save it as old_center
+            if (
+                "detection_result" in doc
+                and "center" in doc["detection_result"]
+            ):
+                old_center = doc["detection_result"]["center"].get("geo")
+                if old_center:
+                    update_data["detection_result.old_center.geo"] = old_center
+                    update_data["detection_result.center_updated_at"] = (
+                        datetime.utcnow()
+                    )
 
             if "adjusted_mask" in doc.get("detection_result", {}):
                 update_data.update(
