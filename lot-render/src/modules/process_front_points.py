@@ -4,7 +4,8 @@ import traceback
 from pathlib import Path
 import json
 from .pixel_to_geo import pixel_to_latlon
-
+from pymongo import MongoClient
+from bson import ObjectId
 
 from .google_roads_circle import process_lot_circle
 from .front_view import visualize_lot_front
@@ -113,15 +114,17 @@ def process_front_points(
 
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
         # Prepara query
         query = {
-            "point_colors.points_lat_lon": {"$exists": True},
-            "point_colors.cardinal_points": {"$exists": True},
-            "point_colors.front_points": {"$exists": False},
-            "confidence": {"$gte": confidence},
+            "$and": [
+                {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
+                {"lot_details.cardinal_points": {"$exists": True}},
+                {"lot_details.point_colors.front_points": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
         }
 
         if doc_id:
@@ -142,18 +145,23 @@ def process_front_points(
             print(f"ID: {lot_id}")
 
             try:
-                # 1. Processar coordenadas do lote usando process_masks
-                processed_lot = process_single_document(lot)
-                if not processed_lot:
-                    print("ERRO: Falha ao processar coordenadas do lote")
+                # Obtém pontos lat/lon do novo formato
+                coordinates = (
+                    lot.get("lot_details", {})
+                    .get("point_colors", {})
+                    .get("points_lat_lon", [])
+                )
+                if not coordinates:
+                    print("ERRO: Pontos lat/lon não encontrados")
                     continue
 
-                print(
-                    f"\nCoordenadas processadas: {len(processed_lot['coordinates'])} pontos"
-                )
+                # Converte para o formato esperado pela função process_lot_circle
+                coordinates = [{"lat": p[0], "lng": p[1]} for p in coordinates]
+
+                print(f"\nCoordenadas processadas: {len(coordinates)} pontos")
 
                 # 2. Processar círculo e obter pontos da rua
-                circle_result = process_lot_circle(processed_lot["coordinates"])
+                circle_result = process_lot_circle(coordinates)
                 if not circle_result["success"]:
                     print(
                         f"ERRO: {circle_result.get('error', 'Falha ao processar círculo')}"
@@ -177,7 +185,7 @@ def process_front_points(
 
                 # Encontrar os dois pontos do lote mais próximos dos pontos da rua
                 front_points = find_closest_points(
-                    processed_lot["coordinates"],
+                    coordinates,
                     circle_result["snapped_points"],
                 )
 
@@ -192,48 +200,40 @@ def process_front_points(
                     print("ERRO: Não foi possível determinar pontos frontais")
                     continue
 
-                # 4. Atualizar documento no MongoDB
-                point_colors = lot.get("point_colors", {})
+                # 4. Atualizar documento no MongoDB com a nova estrutura
+                if "lot_details" not in lot:
+                    lot["lot_details"] = {}
+                if "point_colors" not in lot["lot_details"]:
+                    lot["lot_details"]["point_colors"] = {}
 
-                print("\nDados existentes em point_colors:")
-                for key in point_colors.keys():
-                    print(f"- {key}")
-
-                # Atualizar/adicionar front_points e front_points_lat_lon
-                updates = {
-                    "front_points": front_points,
-                    "front_points_lat_lon": front_points,  # Mesmos valores do front_points
-                    "street_points": circle_result["snapped_points"],
-                    "street_info": (
+                # Preparar dados para atualização
+                update_data = {
+                    "lot_details.point_colors.front_points": front_points,
+                    "lot_details.point_colors.street_points": circle_result[
+                        "snapped_points"
+                    ],
+                    "lot_details.point_colors.street_info": (
                         circle_result["streets_info"][0]
                         if circle_result["streets_info"]
-                        else None
+                        else {}
                     ),
                 }
 
                 # Verificar se houve mudança nos dados
-                current_front_points = point_colors.get("front_points", [])
-                current_front_points_lat_lon = point_colors.get(
-                    "front_points_lat_lon", []
+                current_front_points = (
+                    lot.get("lot_details", {})
+                    .get("point_colors", {})
+                    .get("front_points", [])
                 )
 
                 print("\nComparando dados atuais com novos:")
                 print(f"- Front points atuais: {len(current_front_points)}")
-                print(
-                    f"- Front points lat/lon atuais: {len(current_front_points_lat_lon)}"
-                )
                 print(f"- Novos front points: {len(front_points)}")
 
                 # Atualizar apenas se os dados forem diferentes
-                if (
-                    current_front_points != front_points
-                    or current_front_points_lat_lon != front_points
-                ):
-                    point_colors.update(updates)
-
+                if current_front_points != front_points:
                     print("\nTentando atualizar MongoDB com:")
                     print(f"- Front points: {len(front_points)} pontos")
-                    print(f"- Front points lat/lon: {len(front_points)} pontos")
                     print(
                         f"- Street points: {len(circle_result['snapped_points'])} pontos"
                     )
@@ -243,12 +243,25 @@ def process_front_points(
 
                     result = collection.update_one(
                         {"_id": lot["_id"]},
-                        {"$set": {"point_colors": point_colors}},
+                        {"$set": update_data},
                     )
 
                     if result.modified_count > 0:
                         print("\n✓ Documento atualizado com sucesso")
-                        lot["point_colors"] = point_colors
+                        # Atualizar o documento em memória
+                        lot["lot_details"]["point_colors"].update(
+                            {
+                                "front_points": front_points,
+                                "street_points": circle_result[
+                                    "snapped_points"
+                                ],
+                                "street_info": (
+                                    circle_result["streets_info"][0]
+                                    if circle_result["streets_info"]
+                                    else {}
+                                ),
+                            }
+                        )
                         processed_docs.append(lot)
                     else:
                         print("\n⚠ AVISO: Documento não foi modificado")
@@ -264,7 +277,7 @@ def process_front_points(
                             output_dir / f"front_detection_{lot_id}.html"
                         )
                         visualization_data = {
-                            "lot_coordinates": processed_lot["coordinates"],
+                            "lot_coordinates": coordinates,
                             "snapped_points": circle_result["snapped_points"],
                             "streets_info": circle_result["streets_info"],
                             "front_vertices": front_points,
@@ -298,9 +311,16 @@ def process_front_points(
                 print(f"\n❌ ERRO ao processar lote: {str(e)}")
                 print(traceback.format_exc())
 
+        print("\n=== Resumo do processamento ===")
+        print(f"Total processado: {total_lots}")
+        print(f"Sucessos: {len(processed_docs)}")
+        print("============================\n")
+
+        return processed_docs
+
     except Exception as e:
-        print(f"ERRO crítico: {str(e)}")
-        print(traceback.format_exc())
+        print(f"Erro durante o processamento: {str(e)}")
+        raise
 
     finally:
         if client:
@@ -309,13 +329,6 @@ def process_front_points(
                 print("✅ Conexão com MongoDB fechada com sucesso")
             except Exception as e:
                 print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")
-
-        print("\n=== Resumo do processamento ===")
-        print(f"Total processado: {total_lots}")
-        print(f"Sucessos: {len(processed_docs)}")
-        print("============================\n")
-
-    return processed_docs
 
 
 def find_closest_points(
