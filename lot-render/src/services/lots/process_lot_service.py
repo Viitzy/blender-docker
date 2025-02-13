@@ -72,7 +72,8 @@ async def process_lot_service(
             else:
                 original_points = doc["detection_result"]["geo_points"]
 
-        new_points_lat_lon = [[p["lat"], p["lon"]] for p in points]
+        # Convert Point objects to [lat, lon] format
+        new_points_lat_lon = [[point.lat, point.lon] for point in points]
 
         # If points are different, save the old ones with 'old_' prefix
         if original_points and original_points != new_points_lat_lon:
