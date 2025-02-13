@@ -61,15 +61,15 @@ def process_lots_utm_coordinates(
     try:
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
         # Monta a query base
         query = {
-            "point_colors.points_lat_lon": {"$exists": True},
-            "point_colors.lat_lon_elevation": {"$exists": True},
-            "point_colors.points_utm": {"$exists": False},
-            "confidence": {"$gte": confidence},
+            "lot_details.point_colors.points_lat_lon": {"$exists": True},
+            "lot_details.elevations": {"$exists": True},
+            "lot_details.points_utm": {"$exists": False},
+            "detection_result.confidence": {"$gte": confidence},
         }
 
         # Se foi especificado um ID ou google_place_id, adiciona à query

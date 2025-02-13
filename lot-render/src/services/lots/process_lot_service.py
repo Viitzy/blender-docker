@@ -146,17 +146,17 @@ async def process_lot_service(
 
         if elevations_processed:
             doc = elevations_processed[0]  # Get updated document
-            print("elevations_processed")
 
-        #     # Process UTM coordinates
-        #     utm_processed = process_lots_utm_coordinates(
-        #         mongodb_uri=mongo_db.connection_string,
-        #         doc_id=doc_id,
-        #         confidence=confidence,
-        #     )
+            # Process UTM coordinates
+            utm_processed = process_lots_utm_coordinates(
+                mongodb_uri=mongo_db.connection_string,
+                doc_id=doc_id,
+                confidence=confidence,
+            )
 
-        #     if utm_processed:
-        #         doc = utm_processed[0]  # Get updated document
+            if utm_processed:
+                doc = utm_processed[0]  # Get updated document
+                print("utm_processed")
 
         #         # Process cardinal points
         #         cardinal_processed = process_cardinal_points(
