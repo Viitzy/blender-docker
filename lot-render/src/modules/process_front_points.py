@@ -280,41 +280,41 @@ def process_front_points(
                     print("- Nenhuma atualização necessária")
 
                 # Criar mapa de visualização se solicitado
-                if create_maps or force_visualization:
-                    try:
-                        save_path = (
-                            output_dir / f"front_detection_{lot_id}.html"
-                        )
-                        visualization_data = {
-                            "lot_coordinates": coordinates,
-                            "snapped_points": circle_result["snapped_points"],
-                            "streets_info": circle_result["streets_info"],
-                            "front_vertices": front_points,
-                            "front_vertex_indices": list(
-                                range(len(front_points))
-                            ),
-                        }
+                # if create_maps or force_visualization:
+                #     try:
+                #         save_path = (
+                #             output_dir / f"front_detection_{lot_id}.html"
+                #         )
+                #         visualization_data = {
+                #             "lot_coordinates": coordinates,
+                #             "snapped_points": circle_result["snapped_points"],
+                #             "streets_info": circle_result["streets_info"],
+                #             "front_vertices": front_points,
+                #             "front_vertex_indices": list(
+                #                 range(len(front_points))
+                #             ),
+                #         }
 
-                        print("\nCriando visualização:")
-                        print(f"- Caminho absoluto: {save_path.absolute()}")
-                        print(
-                            f"- Dados: {len(visualization_data['lot_coordinates'])} pontos do lote"
-                        )
-                        print(
-                            f"- Pontos na rua: {len(visualization_data['snapped_points'])}"
-                        )
-                        print(
-                            f"- Pontos frontais: {len(visualization_data['front_vertices'])}"
-                        )
+                #         print("\nCriando visualização:")
+                #         print(f"- Caminho absoluto: {save_path.absolute()}")
+                #         print(
+                #             f"- Dados: {len(visualization_data['lot_coordinates'])} pontos do lote"
+                #         )
+                #         print(
+                #             f"- Pontos na rua: {len(visualization_data['snapped_points'])}"
+                #         )
+                #         print(
+                #             f"- Pontos frontais: {len(visualization_data['front_vertices'])}"
+                #         )
 
-                        visualize_lot_front(
-                            result=visualization_data,
-                            output_path=str(save_path),
-                        )
-                        print("✓ Mapa salvo com sucesso")
-                    except Exception as e:
-                        print(f"\n❌ ERRO ao gerar visualização: {str(e)}")
-                        print(traceback.format_exc())
+                #         visualize_lot_front(
+                #             result=visualization_data,
+                #             output_path=str(save_path),
+                #         )
+                #         print("✓ Mapa salvo com sucesso")
+                #     except Exception as e:
+                #         print(f"\n❌ ERRO ao gerar visualização: {str(e)}")
+                #         print(traceback.format_exc())
 
             except Exception as e:
                 print(f"\n❌ ERRO ao processar lote: {str(e)}")

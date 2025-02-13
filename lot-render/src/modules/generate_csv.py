@@ -9,6 +9,7 @@ import numpy as np
 from pymongo import MongoClient
 from bson import ObjectId
 from google.cloud import storage
+import tempfile
 
 
 def find_nearest_point_color(
@@ -168,35 +169,38 @@ def process_lot_csv(client: MongoClient, doc_id: str, bucket_name: str) -> None:
     """
     try:
         # Obtém o documento
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
         doc = collection.find_one({"_id": ObjectId(doc_id)})
 
         if not doc:
             raise ValueError(f"Documento {doc_id} não encontrado")
 
         # Verifica se tem os dados necessários
-        point_colors = doc.get("point_colors", {})
-        if not all(
-            key in point_colors for key in ["points_utm", "colors_adjusted"]
-        ):
-            raise ValueError("Dados de UTM ou cores não encontrados")
+        lot_details = doc.get("lot_details", {})
+        points_utm = lot_details.get("points_utm", [])
+        elevations = lot_details.get("elevations", [])
+        point_colors = lot_details.get("point_colors", {})
+        colors_adjusted = point_colors.get("colors_adjusted", [])
+
+        if not points_utm or not elevations:
+            raise ValueError("Dados de UTM ou elevações não encontrados")
+
+        if len(points_utm) != len(elevations):
+            raise ValueError("Número diferente de pontos UTM e elevações")
 
         # Prepara os dados para o CSV
-        points_utm = point_colors["points_utm"]
-        colors = point_colors["colors_adjusted"]
-
-        if len(points_utm) != len(colors):
-            raise ValueError("Número diferente de pontos e cores")
-
-        # Cria DataFrame
         data = []
-        for utm_point, color in zip(points_utm, colors):
+        for i, (utm_point, elevation) in enumerate(zip(points_utm, elevations)):
             if not all(
                 x is not None for x in utm_point[:3]
             ):  # Verifica x, y, z
                 continue
 
+            # Pega a cor do ponto, se disponível
+            color = (
+                colors_adjusted[i] if i < len(colors_adjusted) else "#000000"
+            )
             # Converte cor hex para RGB
             rgb = tuple(
                 int(color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)
@@ -206,12 +210,65 @@ def process_lot_csv(client: MongoClient, doc_id: str, bucket_name: str) -> None:
                 {
                     "x": utm_point[0],  # easting
                     "y": utm_point[1],  # northing
-                    "z": utm_point[2],  # elevation
+                    "z": elevation,  # elevation from separate array
+                    "zone_number": (
+                        utm_point[3] if len(utm_point) > 3 else 23
+                    ),  # default to zone 23
+                    "zone_letter": (
+                        utm_point[4] if len(utm_point) > 4 else "K"
+                    ),  # default to K
                     "r": rgb[0],
                     "g": rgb[1],
                     "b": rgb[2],
+                    "hex_color": color,
+                    "front": 0,
+                    "road": 0,
                 }
             )
+
+        # Adiciona pontos da frente, se existirem
+        front_points = point_colors.get("front_points", [])
+        if front_points:
+            for point in front_points:
+                if (
+                    not isinstance(point, dict)
+                    or "lat" not in point
+                    or "lng" not in point
+                ):
+                    continue
+
+                lat, lng = point["lat"], point["lng"]
+                if not isinstance(lat, (int, float)) or not isinstance(
+                    lng, (int, float)
+                ):
+                    continue
+
+                # Converte para UTM
+                x, y, zone_number, zone_letter = utm.from_latlon(lat, lng)
+
+                # Encontra a cor do ponto mais próximo
+                hex_color = find_nearest_point_color(x, y, data)
+                rgb = tuple(
+                    int(hex_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)
+                )
+
+                data.append(
+                    {
+                        "x": x,
+                        "y": y,
+                        "z": (
+                            data[0]["z"] if data else 0
+                        ),  # Usa a elevação do primeiro ponto ou 0
+                        "zone_number": zone_number,
+                        "zone_letter": zone_letter,
+                        "r": rgb[0],
+                        "g": rgb[1],
+                        "b": rgb[2],
+                        "hex_color": hex_color,
+                        "front": 1,
+                        "road": 0,
+                    }
+                )
 
         if not data:
             raise ValueError("Nenhum ponto válido para gerar CSV")
@@ -222,27 +279,31 @@ def process_lot_csv(client: MongoClient, doc_id: str, bucket_name: str) -> None:
         filename = f"{doc_id}.csv"
 
         # Salva temporariamente
-        temp_path = f"/tmp/{filename}"
-        df.to_csv(temp_path, index=False)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False
+        ) as temp_file:
+            df.to_csv(temp_file.name, index=False)
+            temp_path = temp_file.name
 
-        # Upload para GCS
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(f"lots_csv/{filename}")
+            # Upload para GCS
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            blob = bucket.blob(f"csv_files/{filename}")
+            blob.upload_from_filename(temp_path)
 
-        blob.upload_from_filename(temp_path)
+            # Gera URL pública
+            csv_url = f"https://storage.cloud.google.com/{bucket_name}/csv_files/{filename}"
+
+            # Atualiza URL no MongoDB
+            collection.update_one(
+                {"_id": ObjectId(doc_id)},
+                {"$set": {"csv_elevation_colors": csv_url}},
+            )
+
+            print(f"✓ CSV gerado e salvo em: {csv_url}")
 
         # Remove arquivo temporário
-        os.remove(temp_path)
-
-        # Atualiza URL no MongoDB
-        csv_url = f"gs://{bucket_name}/lots_csv/{filename}"
-        collection.update_one(
-            {"_id": ObjectId(doc_id)},
-            {"$set": {"csv_elevation_colors": csv_url}},
-        )
-
-        print(f"✓ CSV gerado e salvo em: {csv_url}")
+        os.unlink(temp_path)
 
     except Exception as e:
         print(f"Erro ao processar lote {doc_id}: {str(e)}")
@@ -255,7 +316,7 @@ def process_lots_csv(
     year: str,
     doc_id: Optional[str] = None,
     confidence: float = 0.62,
-) -> None:
+) -> List[Dict]:
     """
     Processa lotes gerando arquivos CSV.
 
@@ -265,6 +326,9 @@ def process_lots_csv(
         year (str): Ano de referência
         doc_id (Optional[str]): ID específico do documento
         confidence (float): Valor mínimo de confiança
+
+    Returns:
+        List[Dict]: Lista de documentos processados
     """
     print("\n=== Iniciando processamento de lotes ===")
     print(f"Ano: {year}")
@@ -275,140 +339,72 @@ def process_lots_csv(
     try:
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
-        # Lista databases disponíveis
-        print("\nBancos de dados disponíveis:")
-        dbs = client.list_database_names()
-        for db_name in dbs:
-            print(f"- {db_name}")
-
-        # Lista collections do banco
-        print(f"\nCollections em gethome:")
-        collections = db.list_collection_names()
-        for col in collections:
-            print(f"- {col}")
-
-        # Conta documentos na collection
-        total_docs = collection.count_documents({})
-        print(f"\nTotal de documentos na collection: {total_docs}")
-
-        # Define filtro
-        filter_query = {
-            "year": year,
-            "confidence": {"$gte": confidence},
-            "point_colors.points_utm": {"$exists": True},
-            "point_colors.colors_adjusted": {"$exists": True},
-            "csv_elevation_colors": {"$exists": False},
+        # Define query base
+        query = {
+            "$and": [
+                {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
+                {"lot_details.points_utm": {"$exists": True}},
+                {"lot_details.elevations": {"$exists": True}},
+                {"csv_elevation_colors": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
         }
 
+        # Se foi especificado um ID, adiciona à query
         if doc_id:
-            filter_query["_id"] = ObjectId(doc_id)
+            query["_id"] = ObjectId(doc_id)
 
-        # Busca documentos
-        print("\nBuscando documentos no MongoDB...")
-        print(f"Filtro: {filter_query}")
+        total_docs = collection.count_documents(query)
+        print(f"\nTotal de documentos para processar: {total_docs}")
 
-        # Tenta buscar apenas pelo ID primeiro
-        if doc_id:
-            doc_by_id = collection.find_one({"_id": ObjectId(doc_id)})
-            if doc_by_id:
-                print(f"\nDocumento encontrado pelo ID {doc_id}:")
-                print(f"Ano: {doc_by_id.get('year')}")
+        if total_docs == 0:
+            print("Nenhum documento encontrado para processar")
+            return []
 
-        try:
-            lots = collection.find(filter_query)
-            lots_list = list(lots)
-            total_lots = len(lots_list)
+        processed_docs = []
+        errors = 0
 
-            if total_lots == 0:
-                print(
-                    "\n❌ Nenhum documento encontrado com os critérios especificados"
-                )
-                print("Verifique se:")
-                print(f"1. O ano '{year}' está correto")
-                if doc_id:
-                    print(f"2. O Doc ID '{doc_id}' existe")
-                print("\nDados disponíveis na collection:")
+        for doc in collection.find(query):
+            try:
+                current_doc_id = str(doc["_id"])
+                print(f"\nProcessando documento {current_doc_id}")
 
-                # Mostra alguns exemplos de documentos para ajudar no debug
-                sample_docs = collection.aggregate(
-                    [
-                        {"$sample": {"size": 1}},
-                        {"$project": {"year": 1}},
-                    ]
-                )
+                # Processa o lote usando a função existente
+                process_lot_csv(client, current_doc_id, bucket_name)
 
-                for doc in sample_docs:
-                    print(f"Exemplo encontrado: Ano: {doc.get('year')}")
-
-                # Verifica se o documento existe com o ID específico
-                if doc_id:
-                    doc = collection.find_one({"_id": ObjectId(doc_id)})
-                    if doc:
-                        print(
-                            f"\nDocumento com ID {doc_id} existe, mas com dados diferentes:"
-                        )
-                        print(f"Ano no documento: {doc.get('year')}")
-                    else:
-                        print(
-                            f"\nDocumento com ID {doc_id} não existe na collection"
-                        )
-
-                # Mostra anos disponíveis
-                years = collection.distinct("year")
-                if years:
-                    print(f"\nAnos disponíveis na collection:")
-                    for year_available in years:
-                        print(f"- {year_available}")
+                # Obtém o documento atualizado
+                updated_doc = collection.find_one({"_id": doc["_id"]})
+                if updated_doc and updated_doc.get("csv_elevation_colors"):
+                    processed_docs.append(updated_doc)
+                    print(
+                        f"✅ Documento {current_doc_id} processado com sucesso"
+                    )
                 else:
-                    print(f"\nNenhum documento encontrado com o Ano {year}")
-
-                # Mostra alguns anos disponíveis
-                years = collection.distinct("year")
-                if years:
-                    print("\nAlguns anos disponíveis na collection:")
-                    for year_available in list(years)[
-                        :5
-                    ]:  # Mostra apenas os 5 primeiros
-                        print(f"- {year_available}")
-
-                return
-
-            print(f"Encontrados {total_lots} lotes para processar")
-
-            # Processa cada lote
-            processed = 0
-            errors = 0
-
-            for idx, lot in enumerate(lots_list, 1):
-                print(f"\nProcessando lote {idx}/{total_lots}")
-                try:
-                    process_lot_csv(client, str(lot["_id"]), bucket_name)
-                    processed += 1
-                except Exception as e:
-                    print(f"❌ Erro ao processar lote {lot['_id']}: {str(e)}")
+                    print(
+                        f"⚠️ Documento {current_doc_id} não foi atualizado corretamente"
+                    )
                     errors += 1
-                    continue
 
-            print("\n=== Processamento finalizado ===")
-            print(f"Total de lotes: {total_lots}")
-            print(f"Processados com sucesso: {processed}")
-            print(f"Erros: {errors}")
+            except Exception as e:
+                errors += 1
+                print(f"Erro ao processar documento {current_doc_id}: {str(e)}")
+                continue
 
-            if errors > 0:
-                print("\n⚠️ Alguns lotes não foram processados corretamente!")
+        print("\n=== Resumo do processamento ===")
+        print(f"Total de documentos: {total_docs}")
+        print(f"Processados com sucesso: {len(processed_docs)}")
+        print(f"Erros: {errors}")
 
-        except Exception as e:
-            print(f"\n❌ Erro ao acessar o MongoDB: {str(e)}")
+        return processed_docs
 
     except Exception as e:
         print(f"Erro durante o processamento: {str(e)}")
-        raise
+        return []
 
     finally:
-        # Fecha a conexão com segurança
         if client:
             try:
                 client.close()
