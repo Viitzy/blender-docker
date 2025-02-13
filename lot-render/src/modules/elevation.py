@@ -183,7 +183,7 @@ def process_lots_elevation(
         query = {
             "lot_details.point_colors.points_lat_lon": {"$exists": True},
             "lot_details.elevations": {"$size": 0},
-            "confidence": {"$gte": confidence},
+            "detection_result.confidence": {"$gte": confidence},
         }
 
         # Se foi especificado um ID ou google_place_id, adiciona à query
