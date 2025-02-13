@@ -35,11 +35,12 @@ def convert_objectid_to_string(obj):
 async def process_lot_service(
     doc_id: str,
     points: List[Dict[str, float]],
-    zoom: int = 20,
-    confidence: float = 0.62,
 ) -> Dict[str, Any]:
     """
     Service that processes a lot based on its polygon points.
+    Uses fixed values:
+    - zoom: 20
+    - confidence: 0.62
     """
     try:
         google_maps = GoogleMapsAPI()
@@ -47,7 +48,6 @@ async def process_lot_service(
         mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING")
         if not mongo_connection_string:
             return {
-                "id": doc_id,
                 "status": "error",
                 "error": "MongoDB connection string not found in environment variables",
             }
@@ -57,10 +57,13 @@ async def process_lot_service(
 
         if not doc:
             return {
-                "id": doc_id,
                 "status": "error",
                 "error": "Document not found",
             }
+
+        # Fixed values
+        zoom = 20
+        confidence = 0.62
 
         # Check if points are different from the original ones
         original_points = None

@@ -24,11 +24,6 @@ class Point(BaseModel):
 class DetectLotRequest(BaseModel):
     latitude: float
     longitude: float
-    zoom: int = 20
-    confidence: float = 0.62
-    object_id: Optional[str] = None
-    street_name: Optional[str] = None
-    year: Optional[str] = None
 
 
 class DetectLotData(BaseModel):
@@ -45,8 +40,6 @@ class DetectLotResponse(BaseModel):
 class ProcessLotRequest(BaseModel):
     doc_id: str
     points: List[Point]
-    zoom: int = 20
-    confidence: float = 0.62
 
 
 class ProcessLotData(BaseModel):
@@ -69,10 +62,8 @@ async def detect_lot(request: DetectLotRequest):
     result = await detect_lot_service(
         latitude=request.latitude,
         longitude=request.longitude,
-        zoom=request.zoom,
-        confidence=request.confidence,
-        object_id=request.object_id,
-        year=request.year,
+        zoom=20,  # Fixed value
+        confidence=0.62,  # Fixed value
     )
 
     # Convert the service response to the new format
@@ -112,8 +103,8 @@ async def process_lot(request: ProcessLotRequest):
     result = await process_lot_service(
         doc_id=request.doc_id,
         points=request.points,
-        zoom=request.zoom,
-        confidence=request.confidence,
+        zoom=20,  # Fixed value
+        confidence=0.62,  # Fixed value
     )
 
     if result["status"] == "success":
