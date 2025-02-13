@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import Dict, Any, List
 import numpy as np
 from bson import ObjectId
+import tempfile
+from google.cloud import storage
+from geopy.distance import geodesic
 
 from ...apis.google_maps import GoogleMapsAPI
 from ...modules.colors import process_lot_colors
@@ -17,6 +20,11 @@ from ...modules.generate_glb import process_lots_glb
 from ...modules.classify_lots_slope import process_lots_slope
 from ...database.mongodb import MongoDB
 from ...modules.site_images import process_lot_images_for_site
+from ...modules.detection import (
+    detect_lots_and_save,
+    load_yolo_model,
+    get_best_segmentation,
+)
 
 
 def convert_objectid_to_string(obj):
@@ -30,6 +38,48 @@ def convert_objectid_to_string(obj):
     elif isinstance(obj, ObjectId):
         return str(obj)
     return obj
+
+
+def ai_validation(
+    model_result: dict,
+    param_center: tuple,
+) -> tuple[bool, str]:
+    """
+    Validates AI model results and center point distances.
+
+    Args:
+        model_result: Dictionary with model detection results
+        param_center: Tuple of (lat, lon) for the center of polygon received as parameter
+        original_center: Optional tuple of (lat, lon) for original center from database
+
+    Returns:
+        Tuple of (is_valid: bool, error_message: str)
+    """
+    # Check confidence threshold
+    if model_result["confidence"] < 0.7:
+        return (
+            False,
+            f"Confidence too low: {model_result['confidence']:.2f} < 0.7",
+        )
+
+    # Calculate center of AI detected polygon
+    ai_points = model_result["original_detection"]["polygon"]
+    ai_center_lat = sum(p[1] for p in ai_points) / len(
+        ai_points
+    )  # y coordinate is latitude
+    ai_center_lon = sum(p[0] for p in ai_points) / len(
+        ai_points
+    )  # x coordinate is longitude
+    ai_center = (ai_center_lat, ai_center_lon)
+
+    # Check distance between parameter center and AI detected center
+    param_ai_distance = geodesic(param_center, ai_center).meters
+    if param_ai_distance > 45:
+        return (
+            False,
+            f"Distance between parameter center and AI detection too large: {param_ai_distance:.2f}m > 45m",
+        )
+    return True, ""
 
 
 async def process_lot_service(
@@ -69,6 +119,7 @@ async def process_lot_service(
 
         # Check if points are different from the original ones
         original_points = None
+        original_center = None
         if "detection_result" in doc:
             if "adjusted_mask" in doc["detection_result"]:
                 original_points = doc["detection_result"]["adjusted_mask"][
@@ -77,49 +128,163 @@ async def process_lot_service(
             else:
                 original_points = doc["detection_result"]["geo_points"]
 
+            if (
+                "center" in doc["detection_result"]
+                and "geo" in doc["detection_result"]["center"]
+            ):
+                center = doc["detection_result"]["center"]["geo"]
+                original_center = (center["lat"], center["lon"])
+
         # Convert Point objects to [lat, lon] format
         new_points_lat_lon = [[point.lat, point.lon] for point in points]
 
-        # If points are different, save the old ones with 'old_' prefix and update center
+        # If points are different, update satellite image and run detection
         if original_points and original_points != new_points_lat_lon:
             # Calculate center point for new points
             new_center_lat = sum(p.lat for p in points) / len(points)
             new_center_lon = sum(p.lon for p in points) / len(points)
+            new_center = (new_center_lat, new_center_lon)
 
-            update_data = {
-                "detection_result.old_geo_points": original_points,
-                "detection_result.geo_points": new_points_lat_lon,
-                "detection_result.center.geo": {
-                    "lat": new_center_lat,
-                    "lon": new_center_lon,
-                },
-            }
+            # Get new satellite image
+            image_content = google_maps.get_satellite_image(
+                lat=new_center_lat,
+                lng=new_center_lon,
+                zoom=zoom,
+                size="640x640",
+                scale=2,
+            )
 
-            # If there was an existing center, save it as old_center
-            if (
-                "detection_result" in doc
-                and "center" in doc["detection_result"]
-            ):
-                old_center = doc["detection_result"]["center"].get("geo")
-                if old_center:
-                    update_data["detection_result.old_center.geo"] = old_center
-                    update_data["detection_result.center_updated_at"] = (
-                        datetime.utcnow()
+            # Load YOLO model and run detection
+            model_path = os.getenv("YOLO_MODEL_PATH")
+            if not model_path:
+                return {"status": "error", "error": "YOLO_MODEL_PATH not found"}
+
+            model = load_yolo_model(model_path)
+
+            # Create items list for detection
+            items_list = [
+                {
+                    "image_content": image_content,
+                    "object_id": doc_id,
+                    "latitude": new_center_lat,
+                    "longitude": new_center_lon,
+                    "dimensions": "1280x1280",
+                    "zoom": zoom,
+                    "year": str(datetime.now().year),
+                }
+            ]
+
+            # Run detection without mask adjustment
+            processed_docs = detect_lots_and_save(
+                model_path=model_path,
+                items_list=items_list,
+                adjust_mask=False,
+            )
+
+            if not processed_docs:
+                return {
+                    "status": "error",
+                    "error": "No lots detected in the image",
+                }
+
+            # Get detection result
+            detection = processed_docs[0]
+
+            # Validate AI results
+            is_valid, error_message = ai_validation(
+                model_result=detection,
+                param_center=new_center,
+            )
+
+            if not is_valid:
+                return {"status": "error", "error": error_message}
+
+            # Save image to GCS
+            storage_client = storage.Client()
+            bucket = storage_client.bucket("images_from_have_allotment")
+
+            # Save current image path as old if it exists
+            if "image_info" in doc and "path" in doc["image_info"]:
+                old_blob_path = doc["image_info"]["path"]
+                if old_blob_path:
+                    # Move current image to old_ path
+                    old_path = f"old_{old_blob_path}"
+                    bucket.copy_blob(
+                        bucket.blob(old_blob_path), bucket, old_path
                     )
 
-            if "adjusted_mask" in doc.get("detection_result", {}):
-                update_data.update(
-                    {
-                        "detection_result.adjusted_mask.old_geo_points": doc[
-                            "detection_result"
-                        ]["adjusted_mask"]["geo_points"],
-                        "detection_result.adjusted_mask.geo_points": new_points_lat_lon,
-                        "detection_result.adjusted_mask.adjusted_at": datetime.utcnow(),
-                    }
+            # Save new image
+            blob_path = f"satellite_images/{doc_id}.jpg"
+            blob = bucket.blob(blob_path)
+
+            with tempfile.NamedTemporaryFile(
+                suffix=".jpg", delete=False
+            ) as temp_file:
+                temp_file.write(image_content)
+                temp_file.flush()
+                blob.upload_from_filename(temp_file.name)
+                os.unlink(temp_file.name)
+
+            # Generate new image URL
+            satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
+
+            # Save current detection_result as old_detection_result and create new one
+            if "detection_result" in doc:
+                # Convert points to normalized pixel coordinates for mask_points
+                normalized_points = []
+                for point in points:
+                    x_norm, y_norm = lat_lon_to_pixel_normalized(
+                        lat=point.lat,
+                        lon=point.lon,
+                        center_lat=new_center_lat,
+                        center_lon=new_center_lon,
+                        zoom=zoom,
+                        scale=2,
+                        image_width=1280,
+                        image_height=1280,
+                    )
+                    normalized_points.append([x_norm, y_norm])
+
+                # Create new detection result similar to detect_lot_service
+                new_detection_result = {
+                    "center": {
+                        "pixel": {
+                            "x": normalized_points[0][0],
+                            "y": normalized_points[0][1],
+                        },
+                        "geo": {
+                            "lat": new_center_lat,
+                            "lon": new_center_lon,
+                        },
+                    },
+                    "confidence": detection["confidence"],
+                    "mask_points": normalized_points,
+                    "geo_points": new_points_lat_lon,
+                    "yolov8_annotation": points_to_yolov8_annotation(
+                        normalized_points
+                    ),
+                    "processed_at": datetime.utcnow(),
+                }
+
+                update_data = {
+                    "old_detection_result": doc["detection_result"],
+                    "detection_result": new_detection_result,
+                }
+
+                # Update MongoDB with new detection result
+                await mongo_db.update_detection(doc_id, update_data)
+                print(
+                    "Detection result atualizado e histórico salvo com sucesso"
                 )
 
-            await mongo_db.update_detection(doc_id, update_data)
-            print("Pontos atualizados e histórico salvo com sucesso")
+            # Update image_info with new image data and timestamp
+            image_info_update = {
+                "image_info.url": satellite_image_url,
+                "image_info.path": blob_path,
+                "image_info.captured_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            }
+            await mongo_db.update_detection(doc_id, image_info_update)
 
         # Initialize lot_details structure if it doesn't exist
         if "lot_details" not in doc:
