@@ -146,7 +146,7 @@ async def process_lot_service(
 
         # if elevations_processed:
         #     doc = elevations_processed[0]  # Get updated document
-        if True
+        if True:
 
             # Process UTM coordinates
             utm_processed = process_lots_utm_coordinates(
