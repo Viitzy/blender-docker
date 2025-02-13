@@ -85,7 +85,8 @@ def process_lots_glb(
                         f"https://storage.cloud.google.com/{bucket_name_csv}/",
                         "",
                     )
-                    csv_blob = bucket.blob(csv_blob_path)
+                    csv_bucket = storage_client.bucket(bucket_name_csv)
+                    csv_blob = csv_bucket.blob(csv_blob_path)
                     csv_blob.download_to_filename(temp_csv)
 
                     # Executa processo do Blender
