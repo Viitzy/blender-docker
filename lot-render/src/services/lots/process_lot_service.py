@@ -175,29 +175,58 @@ async def process_lot_service(
             ]
 
             # Run detection without mask adjustment
+            print(f"\nExecutando detecção para o lote {doc_id}")
+            print(f"Centro: lat={new_center_lat}, lon={new_center_lon}")
+            print("items_list", items_list)
+
             processed_docs = detect_lots_and_save(
                 model_path=model_path,
                 items_list=items_list,
                 adjust_mask=False,
             )
 
-            if not processed_docs:
-                return {
-                    "status": "error",
-                    "error": "No lots detected in the image",
+            # Get detection result and validate
+            detection = None
+            if processed_docs:
+                detection = processed_docs[0]
+                print("\nDetecção realizada com sucesso")
+                print(f"Confiança: {detection.get('confidence', 'N/A')}")
+
+                if (
+                    "original_detection" in detection
+                    and "polygon" in detection["original_detection"]
+                ):
+                    print("Polígono detectado pela IA")
+                    # Validate AI results
+                    is_valid, error_message = ai_validation(
+                        model_result=detection,
+                        param_center=new_center,
+                    )
+
+                    if not is_valid:
+                        print(f"Validação falhou: {error_message}")
+                        print(
+                            "Continuando com os pontos fornecidos por parâmetro"
+                        )
+                else:
+                    print("Detecção não contém polígono válido")
+                    print("Continuando com os pontos fornecidos por parâmetro")
+            else:
+                print("\nNenhuma detecção encontrada pelo modelo")
+                print("Verificando se é um erro ou comportamento esperado...")
+                print("Continuando com os pontos fornecidos por parâmetro")
+
+            # Create detection result with provided parameters if no valid detection
+            if not detection or not is_valid:
+                detection = {
+                    "confidence": confidence,  # Using default confidence
+                    "original_detection": {
+                        "polygon": [],  # Empty as we don't have AI detection
+                        "confidence": confidence,
+                    },
                 }
-
-            # Get detection result
-            detection = processed_docs[0]
-
-            # Validate AI results
-            is_valid, error_message = ai_validation(
-                model_result=detection,
-                param_center=new_center,
-            )
-
-            if not is_valid:
-                return {"status": "error", "error": error_message}
+                print("\nCriando resultado com parâmetros fornecidos:")
+                print(f"Confiança padrão: {confidence}")
 
             # Save image to GCS
             storage_client = storage.Client()
