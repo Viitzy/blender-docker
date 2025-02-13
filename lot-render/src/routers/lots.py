@@ -31,11 +31,15 @@ class DetectLotRequest(BaseModel):
     year: Optional[str] = None
 
 
-class DetectLotResponse(BaseModel):
-    id: str
-    status: str
+class DetectLotData(BaseModel):
     points: List[Point]
-    error: Optional[str] = None
+
+
+class DetectLotResponse(BaseModel):
+    status: str
+    message: str
+    data: Optional[DetectLotData]
+    meta: Optional[Dict] = None
 
 
 class ProcessLotRequest(BaseModel):
@@ -45,11 +49,15 @@ class ProcessLotRequest(BaseModel):
     confidence: float = 0.62
 
 
+class ProcessLotData(BaseModel):
+    obj_id: str
+
+
 class ProcessLotResponse(BaseModel):
-    id: str
     status: str
-    results: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    message: str
+    data: Optional[ProcessLotData]
+    meta: Optional[Dict] = None
 
 
 @router.post("/detect/", response_model=DetectLotResponse)
@@ -67,7 +75,22 @@ async def detect_lot(request: DetectLotRequest):
         year=request.year,
     )
 
-    return DetectLotResponse(**result)
+    # Convert the service response to the new format
+    if result["status"] == "success":
+        points = [Point(**point) for point in result["points"]]
+        return DetectLotResponse(
+            status="success",
+            message="Success",
+            data=DetectLotData(points=points),
+            meta=result.get("meta"),
+        )
+    else:
+        return DetectLotResponse(
+            status="error",
+            message=result.get("error", "An error occurred"),
+            data=None,
+            meta=result.get("meta"),
+        )
 
 
 @router.post("/process/", response_model=ProcessLotResponse)
@@ -93,4 +116,17 @@ async def process_lot(request: ProcessLotRequest):
         confidence=request.confidence,
     )
 
-    return ProcessLotResponse(**result)
+    if result["status"] == "success":
+        return ProcessLotResponse(
+            status="success",
+            message="Success",
+            data=ProcessLotData(obj_id=result["doc_id"]),
+            meta=None,
+        )
+    else:
+        return ProcessLotResponse(
+            status="error",
+            message=result.get("error", "An error occurred"),
+            data=None,
+            meta=None,
+        )

@@ -267,14 +267,11 @@ async def process_lot_service(
         # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
 
-        # Convert ObjectId to string before returning
-        if final_doc and "_id" in final_doc:
-            final_doc["_id"] = str(final_doc["_id"])
-
-        return {"id": doc_id, "status": "success", "results": final_doc}
+        # Return success response with document ID
+        return {"status": "success", "doc_id": str(doc_id)}
 
     except Exception as e:
-        return {"id": doc_id, "status": "error", "error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 def lat_lon_to_pixel_normalized(
