@@ -9,6 +9,7 @@ from ...apis.google_maps import GoogleMapsAPI
 from ...modules.detection import detect_lots_and_save
 from ...modules.pixel_to_geo import pixel_to_latlon
 from ...database.mongodb import MongoDB
+from ...modules.area import calculate_geo_area
 from google.cloud import storage
 
 
@@ -201,6 +202,33 @@ async def detect_lot_service(
                 image_height=1280,
             )
             points.append({"lat": lat, "lon": lon})
+
+        # Calculate area
+        points_lat_lon = [[p["lat"], p["lon"]] for p in points]
+        area_m2 = calculate_geo_area(points_lat_lon)
+
+        # Initialize lot_details structure
+        lot_details = {
+            "area_m2": area_m2,
+            "point_colors": {
+                "points": [],
+                "colors": [],
+                "colors_adjusted": [],
+                "points_lat_lon": points_lat_lon,
+                "points_utm": [],
+                "cardinal_points": {},
+                "front_points": [],
+                "front_points_lat_lon": [],
+                "street_points": [],
+                "street_info": {},
+            },
+            "elevations": [],
+            "mask_elevation": [],
+            "mask_utm": [],
+        }
+
+        # Update MongoDB with lot_details
+        await mongo_db.update_detection(doc_id, {"lot_details": lot_details})
 
         return {
             "id": doc_id,
