@@ -122,7 +122,16 @@ def process_front_points(
             "$and": [
                 {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
                 {"lot_details.cardinal_points": {"$exists": True}},
-                {"lot_details.point_colors.front_points": {"$exists": False}},
+                {
+                    "$or": [
+                        {
+                            "lot_details.point_colors.front_points": {
+                                "$exists": False
+                            }
+                        },
+                        {"lot_details.point_colors.front_points": {"$size": 0}},
+                    ]
+                },
                 {"detection_result.confidence": {"$gte": confidence}},
             ]
         }
