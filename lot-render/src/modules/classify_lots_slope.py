@@ -121,51 +121,19 @@ def classify_lot_slope(csv_path: str) -> Dict[str, Any]:
         # Lê o CSV
         df = pd.read_csv(csv_path)
 
-        # Obtém altitudes mínima e máxima
-        min_altitude = df["z"].min()
-        max_altitude = df["z"].max()
-        altitude_range = max_altitude - min_altitude
-
-        # Calcula a declividade em porcentagem
-        # Usando a fórmula: (diferença de altura / distância horizontal) * 100
-        points = df[["x", "y", "z"]].values
-        max_slope = 0
-
-        for i in range(len(points)):
-            for j in range(i + 1, len(points)):
-                p1 = points[i]
-                p2 = points[j]
-
-                # Calcula distância horizontal
-                distance = np.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
-                if distance == 0:
-                    continue
-
-                # Calcula declividade
-                height_diff = abs(p2[2] - p1[2])
-                slope = (height_diff / distance) * 100
-                max_slope = max(max_slope, slope)
-
-        # Classifica a declividade
-        if max_slope <= 3:
-            classification = "Plano"
-        elif max_slope <= 8:
-            classification = "Suave ondulado"
-        elif max_slope <= 20:
-            classification = "Ondulado"
-        elif max_slope <= 45:
-            classification = "Forte ondulado"
-        elif max_slope <= 75:
-            classification = "Montanhoso"
-        else:
-            classification = "Escarpado"
+        front_centroid, back_centroid = get_front_and_back_centroids(df)
+        slope_percent = calculate_slope(front_centroid, back_centroid)
+        classification = classify_slope(slope_percent)
+        alt_stats = get_altitude_stats(df)
 
         return {
-            "slope_percent": float(max_slope),
+            "slope_percent": slope_percent,
             "classification": classification,
-            "min_altitude": float(min_altitude),
-            "max_altitude": float(max_altitude),
-            "altitude_range": float(altitude_range),
+            "front_centroid": front_centroid,
+            "back_centroid": back_centroid,
+            "min_altitude": alt_stats["z_min"],
+            "max_altitude": alt_stats["z_max"],
+            "altitude_range": alt_stats["amplitude"],
         }
 
     except Exception as e:
