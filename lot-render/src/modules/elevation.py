@@ -214,9 +214,11 @@ def process_lots_elevation(
                 print(f"Rua: {doc.get('street', 'N/A')}")
 
                 # Obtém os pontos lat/lon do novo formato
-                points_lat_lon = doc["lot_details"]["point_colors"][
-                    "points_lat_lon"
-                ]
+                points_lat_lon = (
+                    doc.get("lot_details", {})
+                    .get("point_colors", {})
+                    .get("points_lat_lon", [])
+                )
                 print(f"Total de pontos para elevação: {len(points_lat_lon)}")
 
                 # Obtém elevações
@@ -224,17 +226,16 @@ def process_lots_elevation(
                     points_lat_lon, api_key, db_path
                 )
 
-                # Atualiza documento
-                point_colors = doc["point_colors"]
-                point_colors["lat_lon_elevation"] = elevations
-
+                # Atualiza documento com as elevações no novo formato
                 result = collection.update_one(
                     {"_id": doc["_id"]},
                     {"$set": {"lot_details.elevations": elevations}},
                 )
 
                 if result.modified_count > 0:
-                    doc["point_colors"] = point_colors
+                    if "lot_details" not in doc:
+                        doc["lot_details"] = {}
+                    doc["lot_details"]["elevations"] = elevations
                     processed_docs.append(doc)
                     print(f"Documento {doc['_id']} atualizado com sucesso")
                     print(
