@@ -1,97 +1,139 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 import json
 import traceback
+from pymongo import MongoClient
+from bson import ObjectId
+from google.cloud import storage
+import tempfile
 from .blender.blender_execution import run_blender_process
 
 
 def process_lots_glb(
-    input_dir: str,
-    output_dir: str,
+    mongodb_uri: str,
+    bucket_name: str,
+    doc_id: Optional[str] = None,
     confidence: float = 0.62,
 ) -> List[Dict]:
     """
-    Processa lotes gerando arquivos GLB a partir dos CSVs locais.
+    Processa lotes gerando arquivos GLB a partir dos CSVs.
+
+    Args:
+        mongodb_uri (str): URI de conexão com MongoDB
+        bucket_name (str): Nome do bucket GCS
+        doc_id (Optional[str]): ID específico do documento
+        confidence (float): Valor mínimo de confiança
+
+    Returns:
+        List[Dict]: Lista de documentos processados
     """
     print("\n=== Iniciando processamento de GLB ===")
     print(f"Filtro de confiança: >= {confidence}")
 
+    client = None
+    storage_client = None
     try:
-        # Cria diretório de saída se não existir
-        os.makedirs(output_dir, exist_ok=True)
+        # Inicializa cliente do GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
 
-        print(f"Arquivos no diretório de entrada: {os.listdir(input_dir)}")
-        # Lista todos os arquivos CSV no diretório de entrada
-        csv_files = [f for f in os.listdir(input_dir) if f.endswith(".csv")]
-        print(f"\nTotal de arquivos para processar: {len(csv_files)}")
+        # Estabelece conexão com MongoDB
+        client = MongoClient(mongodb_uri)
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
+
+        # Define query base
+        query = {
+            "$and": [
+                {"csv_elevation_colors": {"$exists": True}},
+                {"glb_elevation_file": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
+        }
+
+        # Se foi especificado um ID, adiciona à query
+        if doc_id:
+            query["_id"] = ObjectId(doc_id)
+
+        total_docs = collection.count_documents(query)
+        print(f"\nTotal de documentos para processar: {total_docs}")
+
+        if total_docs == 0:
+            print("Nenhum documento encontrado para processar")
+            return []
 
         processed_docs = []
         errors = 0
 
-        for i, csv_file in enumerate(csv_files, 1):
+        for doc in collection.find(query):
             try:
-                # Define nomes dos arquivos
-                base_name = os.path.splitext(csv_file)[0]
-                output_file = os.path.join(output_dir, f"{base_name}.glb")
+                current_doc_id = str(doc["_id"])
+                print(f"\nProcessando documento {current_doc_id}")
 
-                # Procura o JSON no diretório anterior (front)
-                front_dir = os.path.dirname(input_dir)
-                front_dir = os.path.join(front_dir, "front")
-                json_file = os.path.join(front_dir, f"{base_name}.json")
+                # Obtém URL do CSV
+                csv_url = doc["csv_elevation_colors"]
 
-                # Carrega o documento JSON original
-                if not os.path.exists(json_file):
-                    print(f"Arquivo JSON não encontrado: {json_file}")
-                    continue
+                # Cria diretório temporário para trabalhar com os arquivos
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Define caminhos temporários
+                    temp_csv = os.path.join(temp_dir, f"{current_doc_id}.csv")
+                    temp_glb = os.path.join(temp_dir, f"{current_doc_id}.glb")
 
-                with open(json_file, "r") as f:
-                    doc = json.load(f)
-
-                # Verifica a confiança
-                confidence_value = doc.get("original_detection", {}).get(
-                    "confidence", 0
-                )
-                if confidence_value < confidence:
-                    print(
-                        f"Confiança {confidence_value} abaixo do limiar, pulando..."
+                    # Download do CSV do GCS
+                    csv_blob_path = csv_url.replace(
+                        f"https://storage.cloud.google.com/{bucket_name}/", ""
                     )
-                    continue
+                    csv_blob = bucket.blob(csv_blob_path)
+                    csv_blob.download_to_filename(temp_csv)
 
-                # Verifica se já existe arquivo processado
-                if os.path.exists(output_file):
-                    print(
-                        f"\nArquivo {output_file} já processado, carregando dados..."
+                    # Executa processo do Blender
+                    print(f"Executando Blender para {current_doc_id}...")
+                    success = run_blender_process(
+                        input_csv=temp_csv, output_glb=temp_glb
                     )
-                    doc["glb_file"] = output_file
-                    processed_docs.append(doc)
-                    continue
 
-                print(f"\nProcessando arquivo {i}/{len(csv_files)}")
-                csv_path = os.path.join(input_dir, csv_file)
+                    if not success:
+                        print(
+                            f"❌ Falha ao executar Blender para {current_doc_id}"
+                        )
+                        errors += 1
+                        continue
 
-                # Executa processo do Blender
-                print(f"Executando Blender para {csv_file}...")
-                success = run_blender_process(
-                    input_csv=csv_path, output_glb=output_file
-                )
+                    # Upload do GLB para GCS
+                    glb_blob_path = f"glb_files/{current_doc_id}.glb"
+                    glb_blob = bucket.blob(glb_blob_path)
+                    glb_blob.upload_from_filename(temp_glb)
 
-                if not success:
-                    print(f"❌ Falha ao executar Blender para {csv_file}")
-                    errors += 1
-                    continue
+                    # Gera URL pública
+                    glb_url = f"https://storage.cloud.google.com/{bucket_name}/{glb_blob_path}"
 
-                print(f"✓ GLB gerado com sucesso: {output_file}")
-                doc["glb_file"] = output_file
-                processed_docs.append(doc)
+                    # Atualiza o documento com a URL do GLB
+                    result = collection.update_one(
+                        {"_id": ObjectId(current_doc_id)},
+                        {"$set": {"glb_elevation_file": glb_url}},
+                    )
+
+                    if result.modified_count > 0:
+                        print(f"✓ GLB gerado e salvo com sucesso: {glb_url}")
+                        # Obtém o documento atualizado
+                        updated_doc = collection.find_one(
+                            {"_id": ObjectId(current_doc_id)}
+                        )
+                        processed_docs.append(updated_doc)
+                    else:
+                        print(
+                            f"⚠️ Documento {current_doc_id} não foi atualizado"
+                        )
+                        errors += 1
 
             except Exception as e:
                 errors += 1
-                print(f"Erro ao processar arquivo {csv_file}: {str(e)}")
+                print(f"Erro ao processar documento {current_doc_id}: {str(e)}")
                 traceback.print_exc()
                 continue
 
         print("\n=== Resumo do processamento ===")
-        print(f"Total de arquivos: {len(csv_files)}")
+        print(f"Total de documentos: {total_docs}")
         print(f"Processados com sucesso: {len(processed_docs)}")
         print(f"Erros: {errors}")
         print("============================\n")
@@ -102,3 +144,17 @@ def process_lots_glb(
         print(f"Erro durante o processamento: {str(e)}")
         traceback.print_exc()
         return []
+
+    finally:
+        if client:
+            try:
+                client.close()
+                print("✅ Conexão com MongoDB fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com MongoDB: {e}")
+        if storage_client:
+            try:
+                storage_client.close()
+                print("✅ Conexão com GCS fechada com sucesso")
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar conexão com GCS: {e}")
