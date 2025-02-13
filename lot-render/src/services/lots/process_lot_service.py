@@ -150,7 +150,7 @@ async def process_lot_service(
 
             # Process UTM coordinates
             utm_processed = process_lots_utm_coordinates(
-                mongodb_uri=mongo_db.connection_string,
+                mongodb_uri=mongo_connection_string,
                 doc_id=doc_id,
                 confidence=confidence,
             )
