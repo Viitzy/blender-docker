@@ -195,15 +195,16 @@ def process_lots_slope(
 
         # Estabelece conexão com MongoDB
         client = MongoClient(mongodb_uri)
-        db = client.gethome
-        collection = db.lots_coords
+        db = client["gethome-01-hml"]
+        collection = db["lots_detections_details_hmg"]
 
         # Prepara a query base
         base_query = {
-            "year": year,
-            "csv_elevation_colors": {"$exists": True},
-            "slope_classify": {"$exists": False},
-            "confidence": {"$gte": confidence},
+            "$and": [
+                {"csv_elevation_colors": {"$exists": True}},
+                {"lot_details.slope_classify": {"$exists": False}},
+                {"detection_result.confidence": {"$gte": confidence}},
+            ]
         }
 
         # Adiciona doc_id à query se fornecido
@@ -232,12 +233,14 @@ def process_lots_slope(
                 csv_url = doc["csv_elevation_colors"]
 
                 # Extrai o caminho relativo do arquivo no bucket
-                # Remove o prefixo gs://
-                csv_path = csv_url.replace("gs://", "")
-                # Separa bucket e path
-                bucket_name, blob_path = csv_path.split("/", 1)
-                print(f"Bucket: {bucket_name}")
-                print(f"Caminho do blob CSV: {blob_path}")
+                csv_blob_path = csv_url.replace(
+                    "https://storage.cloud.google.com/csv_from_have_allotment/",
+                    "",
+                )
+
+                # Download do CSV do GCS
+                bucket = storage_client.bucket("csv_from_have_allotment")
+                blob = bucket.blob(csv_blob_path)
 
                 # Cria diretório temporário
                 with tempfile.TemporaryDirectory() as temp_dir:
@@ -245,8 +248,6 @@ def process_lots_slope(
                     temp_csv = os.path.join(temp_dir, f"{doc['_id']}.csv")
 
                     # Baixa o arquivo CSV do bucket
-                    bucket = storage_client.bucket(bucket_name)
-                    blob = bucket.blob(blob_path)
                     blob.download_to_filename(temp_csv)
 
                     print(f"Processando lote: {doc['_id']}")
@@ -258,7 +259,7 @@ def process_lots_slope(
                     # Atualiza o documento no MongoDB
                     collection.update_one(
                         {"_id": doc["_id"]},
-                        {"$set": {"slope_classify": result}},
+                        {"$set": {"lot_details.slope_classify": result}},
                     )
 
                     success_count += 1

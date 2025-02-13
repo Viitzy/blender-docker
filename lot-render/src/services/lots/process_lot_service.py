@@ -203,35 +203,30 @@ async def process_lot_service(
                     #     doc = csv_processed[0]  # Get updated document
 
                     # Process GLB (only if CSV was processed)
-                    if doc.get("csv_elevation_colors"):
-                        glb_processed = process_lots_glb(
-                            mongodb_uri=mongo_connection_string,
-                            bucket_name="images_from_have_allotment",
-                            bucket_name_csv="csv_from_have_allotment",
-                            doc_id=doc_id,
-                            confidence=confidence,
-                        )
+                    # if doc.get("csv_elevation_colors"):
+                    #     glb_processed = process_lots_glb(
+                    #         mongodb_uri=mongo_connection_string,
+                    #         bucket_name="images_from_have_allotment",
+                    #         bucket_name_csv="csv_from_have_allotment",
+                    #         doc_id=doc_id,
+                    #         confidence=confidence,
+                    #     )
 
-                        if glb_processed and len(glb_processed) > 0:
-                            print("GLB processado e salvo com sucesso")
-                            doc = glb_processed[0]  # Get updated document
+                    #     if glb_processed and len(glb_processed) > 0:
+                    #         print("GLB processado e salvo com sucesso")
+                    #         doc = glb_processed[0]  # Get updated document
 
-                    #         # Process slope
-                    #         slope_processed = process_lots_slope(
-                    #             mongodb_uri=mongo_db.connection_string,
-                    #             year=str(datetime.now().year),
-                    #             doc_id=doc_id,
-                    #             confidence=confidence,
-                    #         )
+                    # Process slope
+                    slope_processed = process_lots_slope(
+                        mongodb_uri=mongo_connection_string,
+                        year=str(datetime.now().year),
+                        doc_id=doc_id,
+                        confidence=confidence,
+                    )
 
-                    #         if slope_processed:
-                    #             slope_data = slope_processed[0].get(
-                    #                 "slope_info", {}
-                    #             )
-                    #             await mongo_db.update_detection(
-                    #                 doc_id,
-                    #                 {"slope_classify": slope_data},
-                    #             )
+                    if slope_processed:
+                        doc = slope_processed[0]  # Get updated document
+                        print("Slope processado e salvo com sucesso")
 
         # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
