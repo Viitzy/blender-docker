@@ -62,78 +62,78 @@ async def process_lot_service(
                 "error": "Document not found",
             }
 
-        # Calculate area
-        points_lat_lon = [[p.lat, p.lon] for p in points]
-        area_m2 = calculate_geo_area(points_lat_lon)
+        # # Calculate area
+        # points_lat_lon = [[p.lat, p.lon] for p in points]
+        # area_m2 = calculate_geo_area(points_lat_lon)
 
-        # Initialize lot_details structure
-        lot_details = {
-            "area_m2": area_m2,
-            "point_colors": {
-                "points": [],
-                "colors": [],
-                "colors_adjusted": [],
-                "points_lat_lon": points_lat_lon,
-                "points_utm": [],
-                "cardinal_points": {},
-                "front_points": [],
-                "front_points_lat_lon": [],
-                "street_points": [],
-                "street_info": {},
-            },
-            "elevations": [],
-            "mask_elevation": [],
-            "mask_utm": [],
-        }
+        # # Initialize lot_details structure
+        # lot_details = {
+        #     "area_m2": area_m2,
+        #     "point_colors": {
+        #         "points": [],
+        #         "colors": [],
+        #         "colors_adjusted": [],
+        #         "points_lat_lon": points_lat_lon,
+        #         "points_utm": [],
+        #         "cardinal_points": {},
+        #         "front_points": [],
+        #         "front_points_lat_lon": [],
+        #         "street_points": [],
+        #         "street_info": {},
+        #     },
+        #     "elevations": [],
+        #     "mask_elevation": [],
+        #     "mask_utm": [],
+        # }
 
-        # Update MongoDB with initial lot_details
-        await mongo_db.update_detection(doc_id, {"lot_details": lot_details})
+        # # Update MongoDB with initial lot_details
+        # await mongo_db.update_detection(doc_id, {"lot_details": lot_details})
 
-        # Process colors
-        colors_processed = process_lot_colors(
-            mongodb_uri=mongo_connection_string,
-            max_points=130,
-            dark_threshold=70,
-            bright_threshold=215,
-            confidence=confidence,
-            doc_id=doc_id,
-        )
+        # # Process colors
+        # # colors_processed = process_lot_colors(
+        # #     mongodb_uri=mongo_connection_string,
+        # #     max_points=130,
+        # #     dark_threshold=70,
+        # #     bright_threshold=215,
+        # #     confidence=confidence,
+        # #     doc_id=doc_id,
+        # # )
 
-        if colors_processed:
-            point_colors = colors_processed[0].get("point_colors", {})
-            lot_details["point_colors"].update(point_colors)
+        # # if colors_processed:
+        # #     point_colors = colors_processed[0].get("point_colors", {})
+        # #     lot_details["point_colors"].update(point_colors)
 
-            # Update MongoDB with processed colors
-            await mongo_db.update_detection(
-                doc_id,
-                {"lot_details.point_colors": lot_details["point_colors"]},
-            )
+        # #     # Update MongoDB with processed colors
+        # #     await mongo_db.update_detection(
+        # #         doc_id,
+        # #         {"lot_details.point_colors": lot_details["point_colors"]},
+        # #     )
 
-        # Process site images
-        watermark_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "assets"
-            / "watermark.png"
-        )
-        site_images_processed = process_lot_images_for_site(
-            mongodb_uri=mongo_connection_string,
-            hex_color="#e8f34e",
-            watermark_path=str(watermark_path),
-            doc_id=doc_id,
-            confidence=confidence,
-        )
+        # # # Process site images
+        # # watermark_path = (
+        # #     Path(__file__).parent.parent.parent.parent
+        # #     / "assets"
+        # #     / "watermark.png"
+        # # )
+        # # site_images_processed = process_lot_images_for_site(
+        # #     mongodb_uri=mongo_connection_string,
+        # #     hex_color="#e8f34e",
+        # #     watermark_path=str(watermark_path),
+        # #     doc_id=doc_id,
+        # #     confidence=confidence,
+        # # )
 
-        if site_images_processed:
-            site_image = site_images_processed[0]
-            if site_image.get("site_image_url"):
-                await mongo_db.update_detection(
-                    doc_id,
-                    {
-                        "image_info.image_thumb_site": site_image[
-                            "site_image_url"
-                        ]
-                    },
-                )
+        # # if site_images_processed:
+        # #     site_image = site_images_processed[0]
+        # #     if site_image.get("site_image_url"):
+        # #         await mongo_db.update_detection(
+        # #             doc_id,
+        # #             {
+        # #                 "image_info.image_thumb_site": site_image[
+        # #                     "site_image_url"
+        # #                 ]
+        # #             },
+        # #         )
 
         # Process elevations
         google_maps = GoogleMapsAPI()

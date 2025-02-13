@@ -182,7 +182,7 @@ def process_lots_elevation(
         # Monta a query base para documentos com pontos lat/lon em lot_details e que ainda não tenham elevações processadas
         query = {
             "lot_details.point_colors.points_lat_lon": {"$exists": True},
-            "lot_details.elevations": {"$size": 0},
+            "lot_details.elevations": {"$exists": False},
             "detection_result.confidence": {"$gte": confidence},
         }
 
