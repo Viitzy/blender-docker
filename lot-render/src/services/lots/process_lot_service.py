@@ -161,17 +161,17 @@ async def process_lot_service(
             #     print("utm_processed")
 
             # Process cardinal points
-            cardinal_processed = process_cardinal_points(
-                mongodb_uri=mongo_connection_string,
-                distance_meters=5,
-                doc_id=doc_id,
-                confidence=confidence,
-            )
+            # cardinal_processed = process_cardinal_points(
+            #     mongodb_uri=mongo_connection_string,
+            #     distance_meters=5,
+            #     doc_id=doc_id,
+            #     confidence=confidence,
+            # )
 
-            if cardinal_processed:
-                doc = cardinal_processed[0]  # Get updated document
-                print("cardinal_points_processed")
-
+            # if cardinal_processed:
+            #     doc = cardinal_processed[0]  # Get updated document
+            #     print("cardinal_points_processed")
+            if True:
                 # Process front points
                 front_processed = process_front_points(
                     mongodb_uri=mongo_connection_string,
