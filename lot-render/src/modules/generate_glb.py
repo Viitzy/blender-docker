@@ -12,6 +12,7 @@ from .blender.blender_execution import run_blender_process
 def process_lots_glb(
     mongodb_uri: str,
     bucket_name: str,
+    bucket_name_csv: str,
     doc_id: Optional[str] = None,
     confidence: float = 0.62,
 ) -> List[Dict]:
@@ -81,7 +82,8 @@ def process_lots_glb(
 
                     # Download do CSV do GCS
                     csv_blob_path = csv_url.replace(
-                        f"https://storage.cloud.google.com/{bucket_name}/", ""
+                        f"https://storage.cloud.google.com/{bucket_name_csv}/",
+                        "",
                     )
                     csv_blob = bucket.blob(csv_blob_path)
                     csv_blob.download_to_filename(temp_csv)

@@ -207,6 +207,7 @@ async def process_lot_service(
                         glb_processed = process_lots_glb(
                             mongodb_uri=mongo_connection_string,
                             bucket_name="images_from_have_allotment",
+                            bucket_name_csv="csv_from_have_allotment",
                             doc_id=doc_id,
                             confidence=confidence,
                         )
