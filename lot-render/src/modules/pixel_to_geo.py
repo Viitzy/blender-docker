@@ -160,31 +160,3 @@ def lat_lon_to_pixel_normalized(
     y_normalized = pixel_y / image_height
 
     return x_normalized, y_normalized
-
-
-def latlon_to_world_pixel(
-    lat: float, lon: float, zoom: int, scale: int
-) -> tuple:
-    """
-    Converte latitude/longitude para coordenadas de pixel no mundo.
-    Esta é a função inversa de world_pixel_to_latlon.
-
-    Parameters:
-        lat (float): Latitude.
-        lon (float): Longitude.
-        zoom (int): Nível de zoom.
-        scale (int): Fator de escala.
-
-    Returns:
-        (x, y): Coordenadas de pixel no mundo.
-    """
-    sin_y = min(max(math.sin(lat * math.pi / 180.0), -0.9999), 0.9999)
-
-    world_x = scale * (128 << zoom) * (lon + 180.0) / 360.0
-    world_y = (
-        scale
-        * (128 << zoom)
-        * (0.5 - math.log((1 + sin_y) / (1 - sin_y)) / (4 * math.pi))
-    )
-
-    return world_x, world_y
