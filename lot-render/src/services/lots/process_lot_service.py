@@ -261,8 +261,8 @@ async def process_lot_service(
                     center_lon=new_center_lon,
                     zoom=zoom,
                     scale=2,
-                    image_width=640,
-                    image_height=640,
+                    image_width=1280,
+                    image_height=1280,
                 )
                 normalized_points.append([x_norm, y_norm])
 

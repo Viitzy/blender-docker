@@ -230,7 +230,7 @@ def process_lot_images_for_site(
                 else:
                     print("Formato desconhecido para a máscara")
                     continue
-
+                print(contours)
                 # Aplica apenas o contorno
                 processed_image = draw_segment_with_watermark(
                     image=image,
