@@ -25,7 +25,7 @@ from ...modules.detection import (
     load_yolo_model,
     get_best_segmentation,
 )
-from ...modules.pixel_to_geo import pixel_to_latlon, latlon_to_world_pixel
+from ...modules.pixel_to_geo import pixel_to_latlon
 
 
 def convert_objectid_to_string(obj):
@@ -254,11 +254,15 @@ async def process_lot_service(
             # Convert points to normalized pixel coordinates for mask_points
             normalized_points = []
             for point in points:
-                x_norm, y_norm = latlon_to_world_pixel(
+                x_norm, y_norm = lat_lon_to_pixel_normalized(
                     lat=point.lat,
                     lon=point.lon,
+                    center_lat=new_center_lat,
+                    center_lon=new_center_lon,
                     zoom=zoom,
                     scale=2,
+                    image_width=640,
+                    image_height=640,
                 )
                 normalized_points.append([x_norm, y_norm])
 
