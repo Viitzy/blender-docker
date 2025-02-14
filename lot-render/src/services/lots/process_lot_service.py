@@ -247,71 +247,71 @@ async def process_lot_service(
 
             # Create detection result with provided parameters if no valid detection
             if not detection:
-                # Convert points to normalized pixel coordinates for mask_points
-                normalized_points = []
-                for point in points:
-                    x_norm, y_norm = lat_lon_to_pixel_normalized(
-                        lat=point.lat,
-                        lon=point.lon,
-                        center_lat=new_center_lat,
-                        center_lon=new_center_lon,
-                        zoom=zoom,
-                        scale=2,
-                        image_width=1280,
-                        image_height=1280,
-                    )
-                    normalized_points.append([x_norm, y_norm])
+                return {
+                    "status": "error",
+                    "error": "Nenhuma detecção encontrada",
+                }
+            # Convert points to normalized pixel coordinates for mask_points
+            normalized_points = []
+            for point in points:
+                x_norm, y_norm = lat_lon_to_pixel_normalized(
+                    lat=point.lat,
+                    lon=point.lon,
+                    center_lat=new_center_lat,
+                    center_lon=new_center_lon,
+                    zoom=zoom,
+                    scale=2,
+                    image_width=1280,
+                    image_height=1280,
+                )
+                normalized_points.append([x_norm, y_norm])
 
-                # Move current detection_result to old_detection_result
-                if "detection_result" in doc:
-                    update_data = {
-                        "old_detection_result": doc["detection_result"],
-                    }
-                    await mongo_db.update_detection(doc_id, update_data)
-                    print("Detecção original movida para old_detection_result")
+            # Move current detection_result to old_detection_result
+            if "detection_result" in doc:
+                update_data = {
+                    "old_detection_result": doc["detection_result"],
+                }
+                await mongo_db.update_detection(doc_id, update_data)
+                print("Detecção original movida para old_detection_result")
 
-                # Create new detection result with provided points
-                new_detection_result = {
+            # Create new detection result with provided points
+            new_detection_result = {
+                "center": {
+                    "pixel": {
+                        "x": normalized_points[0][0],
+                        "y": normalized_points[0][1],
+                    },
+                    "geo": {
+                        "lat": new_center_lat,
+                        "lon": new_center_lon,
+                    },
+                },
+                "confidence": confidence,
+                "mask_points": normalized_points,
+                "geo_points": new_points_lat_lon,
+                "processed_at": datetime.utcnow(),
+                "adjusted_mask": {
+                    "points": normalized_points,
+                    "geo_points": new_points_lat_lon,
                     "center": {
-                        "pixel": {
-                            "x": normalized_points[0][0],
-                            "y": normalized_points[0][1],
-                        },
                         "geo": {
                             "lat": new_center_lat,
                             "lon": new_center_lon,
-                        },
+                        }
                     },
-                    "confidence": confidence,
-                    "mask_points": normalized_points,
-                    "geo_points": new_points_lat_lon,
-                    "processed_at": datetime.utcnow(),
-                    "adjusted_mask": {
-                        "points": normalized_points,
-                        "geo_points": new_points_lat_lon,
-                        "center": {
-                            "geo": {
-                                "lat": new_center_lat,
-                                "lon": new_center_lon,
-                            }
-                        },
-                        "adjustment_type": "manual",
-                        "adjusted_at": datetime.utcnow(),
-                    },
-                }
+                    "adjustment_type": "manual",
+                    "adjusted_at": datetime.utcnow(),
+                },
+            }
 
-                # Update MongoDB with new detection result
-                await mongo_db.update_detection(
-                    doc_id, {"detection_result": new_detection_result}
-                )
-                print(
-                    "\nCriando novo detection_result com parâmetros fornecidos:"
-                )
-                print(f"Confiança: {confidence}")
-                print("Detecção anterior salva em old_detection_result")
-                print(
-                    "Nova detecção salva em detection_result com adjusted_mask"
-                )
+            # Update MongoDB with new detection result
+            await mongo_db.update_detection(
+                doc_id, {"detection_result": new_detection_result}
+            )
+            print("\nCriando novo detection_result com parâmetros fornecidos:")
+            print(f"Confiança: {confidence}")
+            print("Detecção anterior salva em old_detection_result")
+            print("Nova detecção salva em detection_result com adjusted_mask")
 
             # Save image to GCS
             storage_client = storage.Client()
