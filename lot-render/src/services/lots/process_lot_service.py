@@ -289,6 +289,9 @@ async def process_lot_service(
                 "confidence": confidence,
                 "mask_points": normalized_points,
                 "geo_points": new_points_lat_lon,
+                "yolov8_annotation": points_to_yolov8_annotation(
+                    normalized_points
+                ),
                 "processed_at": datetime.utcnow(),
                 "adjusted_mask": {
                     "points": normalized_points,
@@ -301,6 +304,9 @@ async def process_lot_service(
                     },
                     "adjustment_type": "manual",
                     "adjusted_at": datetime.utcnow(),
+                    "yolov8_annotation": points_to_yolov8_annotation(
+                        normalized_points
+                    ),
                 },
             }
 

@@ -175,113 +175,83 @@ def process_lot_images_for_site(
                             interpolation=cv2.INTER_LANCZOS4,
                         )
 
-                # Obtém os pontos da máscara a partir do novo formato
-                mask_points = None
-                if doc.get("detection_result"):
-                    if "adjusted_mask" in doc["detection_result"] and doc[
-                        "detection_result"
-                    ]["adjusted_mask"].get("points"):
-                        mask_points = doc["detection_result"][
-                            "adjusted_mask"
-                        ].get("points")
-                    else:
-                        mask_points = doc["detection_result"].get("mask_points")
-                if not mask_points:
-                    print("Nenhuma anotação de máscara encontrada")
-                    continue
+                    # Prepara o contorno
+                    if doc.get("detection_result"):
+                        if "adjusted_mask" in doc["detection_result"]:
+                            mask_annotation = doc["detection_result"][
+                                "adjusted_mask"
+                            ].get("yolov8_annotation")
+                        else:
+                            mask_annotation = doc["detection_result"].get(
+                                "yolov8_annotation"
+                            )
 
-                # Converte os pontos da máscara para contornos
-                if isinstance(mask_points, str):
+                    if not mask_annotation:
+                        print(f"Nenhuma anotação de máscara encontrada")
+                        continue
+
+                    # Converte anotação em contornos
                     contours = yolov8_annotation_to_contours(
-                        mask_points, image.shape[:2]
+                        mask_annotation, image.shape[:2]
                     )
-                elif isinstance(mask_points, list):
-                    height, width = image.shape[:2]
-                    if len(mask_points) > 0 and isinstance(
-                        mask_points[0], list
-                    ):
-                        pts = np.array(mask_points, dtype=np.float32)
-                        # Se os pontos parecem normalizados (max <= 1.5), escalar
-                        if np.max(pts) <= 1.5:
-                            pts[:, 0] *= width
-                            pts[:, 1] *= height
-                        pts = pts.astype(np.int32)
-                        pts = pts.reshape((-1, 1, 2))
-                        contours = [pts]
-                    else:
-                        pts = []
-                        # Verifica se o primeiro valor parece normalizado
-                        scale = True if float(mask_points[0]) <= 1.5 else False
-                        for i in range(0, len(mask_points), 2):
-                            x = (
-                                float(mask_points[i]) * width
-                                if scale
-                                else float(mask_points[i])
-                            )
-                            y = (
-                                float(mask_points[i + 1]) * height
-                                if scale
-                                else float(mask_points[i + 1])
-                            )
-                            pts.append([x, y])
-                        pts = np.array(pts, dtype=np.int32)
-                        pts = pts.reshape((-1, 1, 2))
-                        contours = [pts]
-                else:
-                    print("Formato desconhecido para a máscara")
-                    continue
-                print(contours)
-                # Aplica apenas o contorno
-                processed_image = draw_segment_with_watermark(
-                    image=image,
-                    contours=contours,
-                    hex_color=hex_color,
-                    outline_thickness=4,
-                )
+                    print(
+                        f"Contornos gerados com shape da imagem: {image.shape[:2]}"
+                    )
+                    print(
+                        f"Primeiro contorno: {contours[0][:3]}"
+                    )  # Debug dos primeiros 3 pontos
 
-                # Salva temporariamente
-                with tempfile.NamedTemporaryFile(
-                    suffix=".jpg", delete=False
-                ) as temp_file:
-                    temp_path = temp_file.name
-                    encode_params = [
-                        cv2.IMWRITE_JPEG_QUALITY,
-                        95,
-                        cv2.IMWRITE_JPEG_OPTIMIZE,
-                        1,
-                    ]
-                    cv2.imwrite(temp_path, processed_image, encode_params)
+                    # Aplica apenas o contorno
+                    processed_image = draw_segment_with_watermark(
+                        image=image,
+                        contours=contours,
+                        hex_color=hex_color,
+                        outline_thickness=4,
+                    )
 
-                    # Upload para GCS na pasta site_images
-                    site_blob_path = f"site_images/{current_doc_id}.jpg"
-                    blob = bucket.blob(site_blob_path)
-                    blob.upload_from_filename(temp_path)
+                    # Salva temporariamente
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".jpg", delete=False
+                    ) as temp_file:
+                        temp_path = temp_file.name
+                        encode_params = [
+                            cv2.IMWRITE_JPEG_QUALITY,
+                            95,
+                            cv2.IMWRITE_JPEG_OPTIMIZE,
+                            1,
+                        ]
+                        cv2.imwrite(temp_path, processed_image, encode_params)
 
-                    # Gera URL pública com link direto
-                    site_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{site_blob_path}"
+                        # Upload para GCS na pasta site_images
+                        site_blob_path = f"site_images/{current_doc_id}.jpg"
+                        blob = bucket.blob(site_blob_path)
+                        blob.upload_from_filename(temp_path)
 
-                    # Atualiza MongoDB
-                    collection.update_one(
-                        {"_id": doc["_id"]},
-                        {
-                            "$set": {
-                                "image_info.image_thumb_site": site_image_url
+                        # Gera URL pública com link direto
+                        site_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{site_blob_path}"
+
+                        # Atualiza MongoDB
+                        collection.update_one(
+                            {"_id": doc["_id"]},
+                            {
+                                "$set": {
+                                    "image_info.image_thumb_site": site_image_url
+                                }
+                            },
+                        )
+
+                        processed_docs.append(
+                            {
+                                "id": current_doc_id,
+                                "site_image_url": site_image_url,
+                                "confidence": doc.get("confidence"),
                             }
-                        },
-                    )
+                        )
 
-                    processed_docs.append(
-                        {
-                            "id": current_doc_id,
-                            "site_image_url": site_image_url,
-                            "confidence": doc.get("confidence"),
-                        }
-                    )
+                        print(f"Imagem processada e salva: {site_image_url}")
 
-                    print(f"Imagem processada e salva: {site_image_url}")
-
-                # Remove arquivo temporário
-                os.unlink(temp_path)
+                    # Remove arquivo temporário
+                    os.unlink(temp_path)
 
             except Exception as e:
                 print(f"Erro ao processar documento {current_doc_id}: {str(e)}")
