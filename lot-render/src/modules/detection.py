@@ -16,8 +16,28 @@ def load_yolo_model(model_path: str):
     """
     Carrega o modelo YOLO (ultralytics).
     """
-    model = YOLO(model_path)
-    return model
+    try:
+        print(f"\nVerificando arquivo do modelo...")
+        if not os.path.exists(model_path):
+            print(f"❌ Arquivo do modelo não encontrado: {model_path}")
+            raise FileNotFoundError(f"Modelo não encontrado: {model_path}")
+
+        print(f"✓ Arquivo do modelo encontrado: {model_path}")
+        print(f"  Tamanho: {os.path.getsize(model_path) / (1024*1024):.1f} MB")
+
+        model = YOLO(model_path)
+        print(f"✓ Modelo carregado:")
+        print(f"  Tipo: {type(model)}")
+        print(f"  Task: {model.task}")
+        print(f"  Names: {model.names}")
+        return model
+
+    except Exception as e:
+        print(f"❌ Erro ao carregar modelo: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        raise
 
 
 def get_best_segmentation(
@@ -29,20 +49,61 @@ def get_best_segmentation(
     """
     try:
         print("\nIniciando segmentação com YOLOv8...")
+        print(f"Imagem de entrada: {img_512.shape}")
+
+        # Salva a imagem para debug
+        debug_dir = "/tmp/yolo_debug"
+        os.makedirs(debug_dir, exist_ok=True)
+        debug_path = os.path.join(debug_dir, "input_image.jpg")
+        cv2.imwrite(debug_path, img_512)
+        print(f"✓ Imagem de debug salva em: {debug_path}")
+
+        # Verifica se a imagem está no formato correto
+        print("Verificando imagem:")
+        print(f"  Shape: {img_512.shape}")
+        print(f"  Dtype: {img_512.dtype}")
+        print(f"  Min value: {img_512.min()}")
+        print(f"  Max value: {img_512.max()}")
+        print(f"  Mean value: {img_512.mean():.2f}")
+
         # Realiza a detecção
-        results = model(img_512, verbose=True)
+        print("\nExecutando modelo...")
+        results = model(
+            img_512, verbose=True, conf=0.1
+        )  # Reduz confiança mínima para debug
+        print(f"✓ Detecção concluída")
         print(f"Resultados obtidos: {len(results)}")
+
+        # Mais informações sobre os resultados
+        if len(results) > 0:
+            result = results[0]
+            print("\nDetalhes do resultado:")
+            print(
+                f"  Boxes: {len(result.boxes) if hasattr(result, 'boxes') else 0}"
+            )
+            print(
+                f"  Masks: {len(result.masks) if hasattr(result, 'masks') else 0}"
+            )
+            if hasattr(result, "boxes") and len(result.boxes) > 0:
+                for i, box in enumerate(result.boxes):
+                    print(f"  Box {i}:")
+                    print(f"    Confidence: {float(box.conf):.3f}")
+                    print(f"    Class: {int(box.cls)}")
 
         if len(results) == 0:
             print("❌ Nenhum resultado retornado pelo modelo")
             return None
 
-        if len(results[0].masks) == 0:
+        # Verifica se há máscaras no resultado
+        result = results[0]
+        if (
+            not hasattr(result, "masks")
+            or result.masks is None
+            or len(result.masks) == 0
+        ):
             print("❌ Nenhuma máscara encontrada no resultado")
             return None
 
-        # Pega a primeira detecção (assumindo que é a melhor)
-        result = results[0]
         print(f"✓ Máscara encontrada")
         print(f"  Total de máscaras: {len(result.masks)}")
         print(f"  Total de boxes: {len(result.boxes)}")
@@ -61,6 +122,12 @@ def get_best_segmentation(
         # Normaliza os pontos para o intervalo [0,1]
         normalized_points = points / 512  # Assumindo imagem 512x512
         print(f"✓ Pontos normalizados para intervalo [0,1]")
+        print(
+            f"  Primeiro ponto: ({normalized_points[0][0]:.3f}, {normalized_points[0][1]:.3f})"
+        )
+        print(
+            f"  Último ponto: ({normalized_points[-1][0]:.3f}, {normalized_points[-1][1]:.3f})"
+        )
 
         return {
             "polygon": normalized_points,
@@ -125,12 +192,16 @@ def detect_lots_and_save(
         print(f"Total de itens: {len(items_list)}")
         print(f"Ajuste de máscara: {adjust_mask}")
 
+        print("\nCarregando modelo YOLO...")
         model = load_yolo_model(model_path)
+        print("✓ Modelo carregado com sucesso")
 
         for item in items_list:
             try:
                 item_id = item["object_id"]
                 print(f"\nProcessando item: {item_id}")
+                print(f"Latitude: {item.get('latitude')}")
+                print(f"Longitude: {item.get('longitude')}")
 
                 image_content = item.get("image_content")
                 if not image_content:
@@ -139,6 +210,7 @@ def detect_lots_and_save(
                     )
                     continue
 
+                print("Decodificando imagem...")
                 # Converte bytes para numpy array
                 nparr = np.frombuffer(image_content, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -149,10 +221,11 @@ def detect_lots_and_save(
                 print(f"✓ Imagem decodificada com sucesso: {img.shape}")
 
                 # Redimensiona para 512x512
+                print("Redimensionando imagem para 512x512...")
                 img_512 = cv2.resize(
                     img, (512, 512), interpolation=cv2.INTER_AREA
                 )
-                print("✓ Imagem redimensionada para 512x512")
+                print("✓ Imagem redimensionada com sucesso")
 
                 # Realiza a detecção
                 print("\nExecutando detecção com YOLOv8...")
@@ -171,6 +244,7 @@ def detect_lots_and_save(
                 original_area_pixels = calculate_polygon_area(
                     seg_data["polygon"]
                 )
+                print(f"  Área original em pixels: {original_area_pixels:.2f}")
 
                 # Prepara documento base
                 doc_to_save = {
@@ -231,6 +305,12 @@ def detect_lots_and_save(
                                 area_difference_percent
                             ),
                         }
+                        print(
+                            f"  Área ajustada em pixels: {adjusted_area_pixels:.2f}"
+                        )
+                        print(
+                            f"  Diferença de área: {area_difference_percent:.1f}%"
+                        )
 
                 processed_docs.append(doc_to_save)
                 print(f"✓ Item {item_id} processado com sucesso")
@@ -239,6 +319,9 @@ def detect_lots_and_save(
                 print(
                     f"❌ Erro processando item {item.get('object_id', 'N/A')}: {str(e)}"
                 )
+                import traceback
+
+                traceback.print_exc()
                 continue
 
         print(f"\n=== Processamento finalizado ===")
@@ -247,4 +330,7 @@ def detect_lots_and_save(
 
     except Exception as e:
         print(f"❌ Erro durante o processamento: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
         return []
