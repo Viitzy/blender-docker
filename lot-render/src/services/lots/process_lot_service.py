@@ -274,6 +274,18 @@ async def process_lot_service(
                         normalized_points
                     ),
                     "processed_at": datetime.utcnow(),
+                    "adjusted_mask": {
+                        "points": normalized_points,
+                        "geo_points": new_points_lat_lon,
+                        "center": {
+                            "geo": {
+                                "lat": new_center_lat,
+                                "lon": new_center_lon,
+                            }
+                        },
+                        "adjustment_type": "manual",
+                        "adjusted_at": datetime.utcnow(),
+                    },
                 }
 
                 # Update MongoDB with new detection result
@@ -285,262 +297,11 @@ async def process_lot_service(
                 )
                 print(f"Confiança: {confidence}")
                 print("Detecção anterior salva em old_detection_result")
-                print("Nova detecção salva em detection_result")
+                print(
+                    "Nova detecção salva em detection_result com adjusted_mask"
+                )
 
-        #     # Save image to GCS
-        #     storage_client = storage.Client()
-        #     bucket = storage_client.bucket("images_from_have_allotment")
-
-        #     # Save current image path as old if it exists
-        #     if "image_info" in doc and "path" in doc["image_info"]:
-        #         old_blob_path = doc["image_info"]["path"]
-        #         if old_blob_path:
-        #             # Move current image to old_ path
-        #             old_path = f"old_{old_blob_path}"
-        #             bucket.copy_blob(
-        #                 bucket.blob(old_blob_path), bucket, old_path
-        #             )
-
-        #     # Save new image
-        #     blob_path = f"satellite_images/{doc_id}.jpg"
-        #     blob = bucket.blob(blob_path)
-
-        #     with tempfile.NamedTemporaryFile(
-        #         suffix=".jpg", delete=False
-        #     ) as temp_file:
-        #         temp_file.write(image_content)
-        #         temp_file.flush()
-        #         blob.upload_from_filename(temp_file.name)
-        #         os.unlink(temp_file.name)
-
-        #     # Generate new image URL
-        #     satellite_image_url = f"https://storage.cloud.google.com/images_from_have_allotment/{blob_path}"
-
-        #     # Save current detection_result as old_detection_result and create new one
-        #     if "detection_result" in doc:
-        #         # Convert points to normalized pixel coordinates for mask_points
-        #         normalized_points = []
-        #         for point in points:
-        #             x_norm, y_norm = lat_lon_to_pixel_normalized(
-        #                 lat=point.lat,
-        #                 lon=point.lon,
-        #                 center_lat=new_center_lat,
-        #                 center_lon=new_center_lon,
-        #                 zoom=zoom,
-        #                 scale=2,
-        #                 image_width=1280,
-        #                 image_height=1280,
-        #             )
-        #             normalized_points.append([x_norm, y_norm])
-
-        #         # Create new detection result similar to detect_lot_service
-        #         new_detection_result = {
-        #             "center": {
-        #                 "pixel": {
-        #                     "x": normalized_points[0][0],
-        #                     "y": normalized_points[0][1],
-        #                 },
-        #                 "geo": {
-        #                     "lat": new_center_lat,
-        #                     "lon": new_center_lon,
-        #                 },
-        #             },
-        #             "confidence": detection["confidence"],
-        #             "mask_points": normalized_points,
-        #             "geo_points": new_points_lat_lon,
-        #             "yolov8_annotation": points_to_yolov8_annotation(
-        #                 normalized_points
-        #             ),
-        #             "processed_at": datetime.utcnow(),
-        #         }
-
-        #         update_data = {
-        #             "old_detection_result": doc["detection_result"],
-        #             "detection_result": new_detection_result,
-        #         }
-
-        #         # Update MongoDB with new detection result
-        #         await mongo_db.update_detection(doc_id, update_data)
-        #         print(
-        #             "Detection result atualizado e histórico salvo com sucesso"
-        #         )
-
-        #     # Update image_info with new image data and timestamp
-        #     image_info_update = {
-        #         "image_info.url": satellite_image_url,
-        #         "image_info.path": blob_path,
-        #         "image_info.captured_at": datetime.utcnow(),
-        #         "updated_at": datetime.utcnow(),
-        #     }
-        #     await mongo_db.update_detection(doc_id, image_info_update)
-
-        # # Initialize lot_details structure if it doesn't exist
-        # if "lot_details" not in doc:
-        #     lot_details = {
-        #         "point_colors": {
-        #             "points": [],
-        #             "colors": [],
-        #             "colors_adjusted": [],
-        #             "points_lat_lon": new_points_lat_lon,
-        #             "points_utm": [],
-        #             "cardinal_points": {},
-        #             "front_points": [],
-        #             "front_points_lat_lon": [],
-        #             "street_points": [],
-        #             "street_info": {},
-        #         },
-        #         "elevations": [],
-        #         "mask_elevation": [],
-        #         "mask_utm": [],
-        #     }
-        #     # Update MongoDB with initial lot_details
-        #     await mongo_db.update_detection(
-        #         doc_id, {"lot_details": lot_details}
-        #     )
-        # else:
-        #     # Update points_lat_lon in existing lot_details
-        #     await mongo_db.update_detection(
-        #         doc_id,
-        #         {"lot_details.point_colors.points_lat_lon": new_points_lat_lon},
-        #     )
-
-        # # Process colors
-        # colors_processed = process_lot_colors(
-        #     mongodb_uri=mongo_connection_string,
-        #     max_points=130,
-        #     dark_threshold=70,
-        #     bright_threshold=215,
-        #     confidence=confidence,
-        #     doc_id=doc_id,
-        # )
-
-        # if colors_processed:
-        #     point_colors = colors_processed[0].get("point_colors", {})
-        #     await mongo_db.update_detection(
-        #         doc_id,
-        #         {"lot_details.point_colors": point_colors},
-        #     )
-
-        # # Process site images
-        # watermark_path = (
-        #     Path(__file__).parent.parent.parent.parent
-        #     / "assets"
-        #     / "watermark.png"
-        # )
-        # site_images_processed = process_lot_images_for_site(
-        #     mongodb_uri=mongo_connection_string,
-        #     hex_color="#e8f34e",
-        #     watermark_path=str(watermark_path),
-        #     doc_id=doc_id,
-        #     confidence=confidence,
-        # )
-
-        # if site_images_processed:
-        #     site_image = site_images_processed[0]
-        #     if site_image.get("site_image_url"):
-        #         await mongo_db.update_detection(
-        #             doc_id,
-        #             {
-        #                 "image_info.image_thumb_site": site_image[
-        #                     "site_image_url"
-        #                 ]
-        #             },
-        #         )
-
-        # # Process elevations
-        # google_maps = GoogleMapsAPI()
-        # # Check if document already has elevations
-        # doc = await mongo_db.get_detection(doc_id)
-        # if not doc.get("lot_details", {}).get("elevations"):
-        #     elevations_processed = process_lots_elevation(
-        #         mongodb_uri=mongo_connection_string,
-        #         api_key=google_maps.api_key,
-        #         doc_id=doc_id,
-        #         confidence=confidence,
-        #     )
-
-        #     if elevations_processed:
-        #         doc = elevations_processed[0]  # Get updated document
-        # else:
-        #     print("Elevations already exist, skipping elevation processing")
-
-        # # Process UTM coordinates
-        # utm_processed = process_lots_utm_coordinates(
-        #     mongodb_uri=mongo_connection_string,
-        #     doc_id=doc_id,
-        #     confidence=confidence,
-        # )
-
-        # if utm_processed:
-        #     doc = utm_processed[0]  # Get updated document
-        #     print("utm_processed")
-
-        # # Process cardinal points
-        # cardinal_processed = process_cardinal_points(
-        #     mongodb_uri=mongo_connection_string,
-        #     distance_meters=5,
-        #     doc_id=doc_id,
-        #     confidence=confidence,
-        # )
-
-        # if cardinal_processed:
-        #     doc = cardinal_processed[0]  # Get updated document
-        #     print("cardinal_points_processed")
-
-        #     # Process front points
-        #     front_processed = process_front_points(
-        #         mongodb_uri=mongo_connection_string,
-        #         google_maps_api_key=google_maps.api_key,
-        #         create_maps=False,
-        #         doc_id=doc_id,
-        #         confidence=confidence,
-        #     )
-
-        #     if front_processed:
-        #         point_colors = front_processed[0].get("point_colors", {})
-        #         await mongo_db.update_detection(
-        #             doc_id, {"point_colors": point_colors}
-        #         )
-
-        #         # Process CSV
-        #         csv_processed = process_lots_csv(
-        #             mongodb_uri=mongo_connection_string,
-        #             bucket_name="csv_from_have_allotment",
-        #             year=str(datetime.now().year),
-        #             doc_id=doc_id,
-        #             confidence=confidence,
-        #         )
-
-        #         if csv_processed and len(csv_processed) > 0:
-        #             # CSV URL is already updated in MongoDB by process_lots_csv
-        #             print("CSV processado e salvo com sucesso")
-        #             doc = csv_processed[0]  # Get updated document
-
-        #         # Process GLB (only if CSV was processed)
-        #         if doc.get("csv_elevation_colors"):
-        #             glb_processed = process_lots_glb(
-        #                 mongodb_uri=mongo_connection_string,
-        #                 bucket_name="images_from_have_allotment",
-        #                 bucket_name_csv="csv_from_have_allotment",
-        #                 doc_id=doc_id,
-        #                 confidence=confidence,
-        #             )
-
-        #             if glb_processed and len(glb_processed) > 0:
-        #                 print("GLB processado e salvo com sucesso")
-        #                 doc = glb_processed[0]  # Get updated document
-
-        #         # Process slope
-        #         slope_processed = process_lots_slope(
-        #             mongodb_uri=mongo_connection_string,
-        #             year=str(datetime.now().year),
-        #             doc_id=doc_id,
-        #             confidence=confidence,
-        #         )
-
-        #         if slope_processed:
-        #             doc = slope_processed[0]  # Get updated document
-        #             print("Slope processado e salvo com sucesso")
+        #     # Save ÷t("Slope processado e salvo com sucesso")
 
         # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
