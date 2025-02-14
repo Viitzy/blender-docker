@@ -25,7 +25,7 @@ from ...modules.detection import (
     load_yolo_model,
     get_best_segmentation,
 )
-from ...modules.pixel_to_geo import pixel_to_latlon
+from ...modules.pixel_to_geo import pixel_to_latlon, lat_lon_to_pixel_normalized
 
 
 def convert_objectid_to_string(obj):
@@ -535,43 +535,43 @@ async def process_lot_service(
         return {"status": "error", "error": str(e)}
 
 
-def lat_lon_to_pixel_normalized(
-    lat: float,
-    lon: float,
-    center_lat: float,
-    center_lon: float,
-    zoom: int,
-    scale: int,
-    image_width: int,
-    image_height: int,
-) -> tuple:
-    """Convert lat/lon to normalized pixel coordinates (0-1)."""
-    # First convert lat/lon to world coordinates
-    sin_y = min(max(np.sin(lat * np.pi / 180), -0.9999), 0.9999)
-    world_x = 256 * (lon + 180) / 360
-    world_y = 256 * (0.5 - np.log((1 + sin_y) / (1 - sin_y)) / (4 * np.pi))
+# def lat_lon_to_pixel_normalized(
+#     lat: float,
+#     lon: float,
+#     center_lat: float,
+#     center_lon: float,
+#     zoom: int,
+#     scale: int,
+#     image_width: int,
+#     image_height: int,
+# ) -> tuple:
+#     """Convert lat/lon to normalized pixel coordinates (0-1)."""
+#     # First convert lat/lon to world coordinates
+#     sin_y = min(max(np.sin(lat * np.pi / 180), -0.9999), 0.9999)
+#     world_x = 256 * (lon + 180) / 360
+#     world_y = 256 * (0.5 - np.log((1 + sin_y) / (1 - sin_y)) / (4 * np.pi))
 
-    # Convert center lat/lon to world coordinates
-    sin_y_center = min(max(np.sin(center_lat * np.pi / 180), -0.9999), 0.9999)
-    center_world_x = 256 * (center_lon + 180) / 360
-    center_world_y = 256 * (
-        0.5 - np.log((1 + sin_y_center) / (1 - sin_y_center)) / (4 * np.pi)
-    )
+#     # Convert center lat/lon to world coordinates
+#     sin_y_center = min(max(np.sin(center_lat * np.pi / 180), -0.9999), 0.9999)
+#     center_world_x = 256 * (center_lon + 180) / 360
+#     center_world_y = 256 * (
+#         0.5 - np.log((1 + sin_y_center) / (1 - sin_y_center)) / (4 * np.pi)
+#     )
 
-    # Calculate pixel coordinates
-    scale_factor = 2**zoom
-    pixel_x = (world_x - center_world_x) * scale_factor + image_width / (
-        2 * scale
-    )
-    pixel_y = (world_y - center_world_y) * scale_factor + image_height / (
-        2 * scale
-    )
+#     # Calculate pixel coordinates
+#     scale_factor = 2**zoom
+#     pixel_x = (world_x - center_world_x) * scale_factor + image_width / (
+#         2 * scale
+#     )
+#     pixel_y = (world_y - center_world_y) * scale_factor + image_height / (
+#         2 * scale
+#     )
 
-    # Normalize coordinates
-    x_normalized = pixel_x / image_width
-    y_normalized = pixel_y / image_height
+#     # Normalize coordinates
+#     x_normalized = pixel_x / image_width
+#     y_normalized = pixel_y / image_height
 
-    return x_normalized, y_normalized
+#     return x_normalized, y_normalized
 
 
 def points_to_yolov8_annotation(points: List[List[float]]) -> str:
