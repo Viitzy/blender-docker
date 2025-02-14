@@ -47,7 +47,6 @@ def process_lots_glb(
         query = {
             "$and": [
                 {"csv_elevation_colors": {"$exists": True}},
-                {"glb_elevation_file": {"$exists": False}},
                 {"detection_result.confidence": {"$gte": confidence}},
             ]
         }

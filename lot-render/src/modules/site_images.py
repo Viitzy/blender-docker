@@ -117,7 +117,6 @@ def process_lot_images_for_site(
 
         # Consulta atualizada de acordo com a nova estrutura do documento
         query = {
-            "image_info.image_thumb_site": {"$exists": False},
             "image_info.url": {"$exists": True},
             "detection_result.confidence": {"$gte": confidence},
         }

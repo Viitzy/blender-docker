@@ -277,7 +277,6 @@ def process_lots_csv(
                 {"lot_details.point_colors.points_lat_lon": {"$exists": True}},
                 {"lot_details.points_utm": {"$exists": True}},
                 {"lot_details.elevations": {"$exists": True}},
-                {"csv_elevation_colors": {"$exists": False}},
                 {"detection_result.confidence": {"$gte": confidence}},
             ]
         }
