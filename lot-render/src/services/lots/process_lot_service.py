@@ -25,6 +25,7 @@ from ...modules.detection import (
     load_yolo_model,
     get_best_segmentation,
 )
+from ...modules.pixel_to_geo import pixel_to_latlon
 
 
 def convert_objectid_to_string(obj):
@@ -43,6 +44,7 @@ def convert_objectid_to_string(obj):
 def ai_validation(
     model_result: dict,
     param_center: tuple,
+    zoom: int = 20,
 ) -> tuple[bool, str]:
     """
     Validates AI model results and center point distances.
@@ -50,6 +52,7 @@ def ai_validation(
     Args:
         model_result: Dictionary with model detection results
         param_center: Tuple of (lat, lon) for the center of polygon received as parameter
+        zoom: Zoom level used for the satellite image
 
     Returns:
         Tuple of (is_valid: bool, error_message: str)
@@ -71,19 +74,30 @@ def ai_validation(
     if not ai_points:
         return (False, "Polígono da IA está vazio")
 
-    ai_center_lat = sum(p[1] for p in ai_points) / len(
-        ai_points
-    )  # y coordinate is latitude
-    ai_center_lon = sum(p[0] for p in ai_points) / len(
-        ai_points
-    )  # x coordinate is longitude
-    ai_center = (ai_center_lat, ai_center_lon)
+    # Calculate normalized center
+    ai_center_x = sum(p[0] for p in ai_points) / len(ai_points)
+    ai_center_y = sum(p[1] for p in ai_points) / len(ai_points)
+
+    # Convert normalized center to lat/lon
+    param_center_lat, param_center_lon = param_center
+    ai_center_lat, ai_center_lon = pixel_to_latlon(
+        pixel_x=ai_center_x * 1280,  # Convert from normalized (0-1) to pixels
+        pixel_y=ai_center_y * 1280,
+        center_lat=param_center_lat,
+        center_lon=param_center_lon,
+        zoom=zoom,
+        scale=2,
+        image_width=1280,
+        image_height=1280,
+    )
 
     print(f"Centro do polígono por parâmetro: {param_center}")
-    print(f"Centro do polígono detectado: {ai_center}")
+    print(f"Centro do polígono detectado: ({ai_center_lat}, {ai_center_lon})")
 
     # Check distance between parameter center and AI detected center
-    param_ai_distance = geodesic(param_center, ai_center).meters
+    param_ai_distance = geodesic(
+        param_center, (ai_center_lat, ai_center_lon)
+    ).meters
     print(f"Distância entre centros: {param_ai_distance:.2f}m")
 
     if param_ai_distance > 45:
@@ -214,6 +228,7 @@ async def process_lot_service(
                     is_valid, error_message = ai_validation(
                         model_result=detection,
                         param_center=new_center,
+                        zoom=zoom,
                     )
 
                     if not is_valid:
