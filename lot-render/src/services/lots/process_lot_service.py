@@ -74,25 +74,32 @@ def ai_validation(
     if not ai_points:
         return (False, "Polígono da IA está vazio")
 
-    # Calculate normalized center
-    ai_center_x = sum(p[0] for p in ai_points) / len(ai_points)
-    ai_center_y = sum(p[1] for p in ai_points) / len(ai_points)
-
-    # Convert normalized center to lat/lon
+    # Get parameters from param_center
     param_center_lat, param_center_lon = param_center
-    ai_center_lat, ai_center_lon = pixel_to_latlon(
-        pixel_x=ai_center_x * 1280,  # Convert from normalized (0-1) to pixels
-        pixel_y=ai_center_y * 1280,
-        center_lat=param_center_lat,
-        center_lon=param_center_lon,
-        zoom=zoom,
-        scale=2,
-        image_width=1280,
-        image_height=1280,
-    )
+
+    # Primeiro converte cada ponto do polígono para lat/lon
+    ai_points_latlon = []
+    for x_norm, y_norm in ai_points:
+        lat, lon = pixel_to_latlon(
+            pixel_x=x_norm * 1280,  # Convert from normalized (0-1) to pixels
+            pixel_y=y_norm * 1280,
+            center_lat=param_center_lat,
+            center_lon=param_center_lon,
+            zoom=zoom,
+            scale=2,
+            image_width=1280,
+            image_height=1280,
+        )
+        ai_points_latlon.append((lat, lon))
+
+    # Calcula o centro como média das coordenadas lat/lon
+    ai_center_lat = sum(p[0] for p in ai_points_latlon) / len(ai_points_latlon)
+    ai_center_lon = sum(p[1] for p in ai_points_latlon) / len(ai_points_latlon)
 
     print(f"Centro do polígono por parâmetro: {param_center}")
-    print(f"Centro do polígono detectado: ({ai_center_lat}, {ai_center_lon})")
+    print(
+        f"Centro do polígono detectado: ({ai_center_lat:.6f}, {ai_center_lon:.6f})"
+    )
 
     # Check distance between parameter center and AI detected center
     param_ai_distance = geodesic(
