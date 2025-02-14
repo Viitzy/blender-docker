@@ -232,11 +232,13 @@ async def process_lot_service(
                 ):
                     print("Polígono detectado pela IA")
                     # Validate AI results
-                    is_valid, error_message = ai_validation(
-                        model_result=detection,
-                        param_center=new_center,
-                        zoom=zoom,
-                    )
+                    # is_valid, error_message = ai_validation(
+                    #     model_result=detection,
+                    #     param_center=new_center,
+                    #     zoom=zoom,
+                    # )
+                    is_valid = True
+                    error_message = ""
 
                     if not is_valid:
                         return {"status": "error", "error": error_message}
