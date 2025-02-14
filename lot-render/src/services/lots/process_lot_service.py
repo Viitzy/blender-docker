@@ -50,20 +50,27 @@ def ai_validation(
     Args:
         model_result: Dictionary with model detection results
         param_center: Tuple of (lat, lon) for the center of polygon received as parameter
-        original_center: Optional tuple of (lat, lon) for original center from database
 
     Returns:
         Tuple of (is_valid: bool, error_message: str)
     """
+    print("\nValidando resultados da IA...")
+
     # Check confidence threshold
-    if model_result["confidence"] < 0.7:
+    confidence = model_result.get("confidence", 0)
+    print(f"Verificando confiança: {confidence:.3f}")
+    if confidence < 0.7:
         return (
             False,
-            f"Confidence too low: {model_result['confidence']:.2f} < 0.7",
+            f"Confiança muito baixa: {confidence:.3f} < 0.7",
         )
+    print("✓ Confiança passou no limite mínimo")
 
     # Calculate center of AI detected polygon
     ai_points = model_result["original_detection"]["polygon"]
+    if not ai_points:
+        return (False, "Polígono da IA está vazio")
+
     ai_center_lat = sum(p[1] for p in ai_points) / len(
         ai_points
     )  # y coordinate is latitude
@@ -72,13 +79,20 @@ def ai_validation(
     )  # x coordinate is longitude
     ai_center = (ai_center_lat, ai_center_lon)
 
+    print(f"Centro do polígono por parâmetro: {param_center}")
+    print(f"Centro do polígono detectado: {ai_center}")
+
     # Check distance between parameter center and AI detected center
     param_ai_distance = geodesic(param_center, ai_center).meters
+    print(f"Distância entre centros: {param_ai_distance:.2f}m")
+
     if param_ai_distance > 45:
         return (
             False,
-            f"Distance between parameter center and AI detection too large: {param_ai_distance:.2f}m > 45m",
+            f"Distância entre o centro do parâmetro e da detecção muito grande: {param_ai_distance:.2f}m > 45m",
         )
+    print("✓ Distância entre centros dentro do limite")
+
     return True, ""
 
 
@@ -203,29 +217,75 @@ async def process_lot_service(
                     )
 
                     if not is_valid:
-                        print(f"Validação falhou: {error_message}")
-                        print(
-                            "Continuando com os pontos fornecidos por parâmetro"
-                        )
+                        return {"status": "error", "error": error_message}
+
+                    print("✓ Validação da IA passou com sucesso")
+                    print(f"  Confiança: {detection['confidence']:.3f}")
                 else:
                     print("Detecção não contém polígono válido")
                     print("Continuando com os pontos fornecidos por parâmetro")
+                    detection = None
             else:
                 print("\nNenhuma detecção encontrada pelo modelo")
-                print("Verificando se é um erro ou comportamento esperado...")
                 print("Continuando com os pontos fornecidos por parâmetro")
+                detection = None
 
-        #     # Create detection result with provided parameters if no valid detection
-        #     if not detection or not is_valid:
-        #         detection = {
-        #             "confidence": confidence,  # Using default confidence
-        #             "original_detection": {
-        #                 "polygon": [],  # Empty as we don't have AI detection
-        #                 "confidence": confidence,
-        #             },
-        #         }
-        #         print("\nCriando resultado com parâmetros fornecidos:")
-        #         print(f"Confiança padrão: {confidence}")
+            # Create detection result with provided parameters if no valid detection
+            if not detection:
+                # Convert points to normalized pixel coordinates for mask_points
+                normalized_points = []
+                for point in points:
+                    x_norm, y_norm = lat_lon_to_pixel_normalized(
+                        lat=point.lat,
+                        lon=point.lon,
+                        center_lat=new_center_lat,
+                        center_lon=new_center_lon,
+                        zoom=zoom,
+                        scale=2,
+                        image_width=1280,
+                        image_height=1280,
+                    )
+                    normalized_points.append([x_norm, y_norm])
+
+                # Move current detection_result to old_detection_result
+                if "detection_result" in doc:
+                    update_data = {
+                        "old_detection_result": doc["detection_result"],
+                    }
+                    await mongo_db.update_detection(doc_id, update_data)
+                    print("Detecção original movida para old_detection_result")
+
+                # Create new detection result with provided points
+                new_detection_result = {
+                    "center": {
+                        "pixel": {
+                            "x": normalized_points[0][0],
+                            "y": normalized_points[0][1],
+                        },
+                        "geo": {
+                            "lat": new_center_lat,
+                            "lon": new_center_lon,
+                        },
+                    },
+                    "confidence": confidence,
+                    "mask_points": normalized_points,
+                    "geo_points": new_points_lat_lon,
+                    "yolov8_annotation": points_to_yolov8_annotation(
+                        normalized_points
+                    ),
+                    "processed_at": datetime.utcnow(),
+                }
+
+                # Update MongoDB with new detection result
+                await mongo_db.update_detection(
+                    doc_id, {"detection_result": new_detection_result}
+                )
+                print(
+                    "\nCriando novo detection_result com parâmetros fornecidos:"
+                )
+                print(f"Confiança: {confidence}")
+                print("Detecção anterior salva em old_detection_result")
+                print("Nova detecção salva em detection_result")
 
         #     # Save image to GCS
         #     storage_client = storage.Client()

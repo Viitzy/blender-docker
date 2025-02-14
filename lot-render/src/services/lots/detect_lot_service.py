@@ -122,6 +122,9 @@ async def detect_lot_service(
 
         # Convert normalized pixel coordinates to lat/lon points for original mask
         original_points = []
+        print(
+            f"Original detection: {detection['original_detection']['polygon']}"
+        )
         for x, y in detection["original_detection"]["polygon"]:
             lat, lon = pixel_to_latlon(
                 pixel_x=x * 1280,
