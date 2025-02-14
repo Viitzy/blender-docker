@@ -16,28 +16,8 @@ def load_yolo_model(model_path: str):
     """
     Carrega o modelo YOLO (ultralytics).
     """
-    try:
-        print(f"\nVerificando arquivo do modelo...")
-        if not os.path.exists(model_path):
-            print(f"❌ Arquivo do modelo não encontrado: {model_path}")
-            raise FileNotFoundError(f"Modelo não encontrado: {model_path}")
-
-        print(f"✓ Arquivo do modelo encontrado: {model_path}")
-        print(f"  Tamanho: {os.path.getsize(model_path) / (1024*1024):.1f} MB")
-
-        model = YOLO(model_path)
-        print(f"✓ Modelo carregado:")
-        print(f"  Tipo: {type(model)}")
-        print(f"  Task: {model.task}")
-        print(f"  Names: {model.names}")
-        return model
-
-    except Exception as e:
-        print(f"❌ Erro ao carregar modelo: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
-        raise
+    model = YOLO(model_path)
+    return model
 
 
 def get_best_segmentation(
@@ -48,98 +28,50 @@ def get_best_segmentation(
     Realiza a detecção e retorna a melhor segmentação.
     """
     try:
-        print("\nIniciando segmentação com YOLOv8...")
-        print(f"Imagem de entrada: {img_512.shape}")
-
-        # Salva a imagem para debug
-        debug_dir = "/tmp/yolo_debug"
-        os.makedirs(debug_dir, exist_ok=True)
-        debug_path = os.path.join(debug_dir, "input_image.jpg")
-        cv2.imwrite(debug_path, img_512)
-        print(f"✓ Imagem de debug salva em: {debug_path}")
-
-        # Verifica se a imagem está no formato correto
-        print("Verificando imagem:")
-        print(f"  Shape: {img_512.shape}")
-        print(f"  Dtype: {img_512.dtype}")
-        print(f"  Min value: {img_512.min()}")
-        print(f"  Max value: {img_512.max()}")
-        print(f"  Mean value: {img_512.mean():.2f}")
-
         # Realiza a detecção
-        print("\nExecutando modelo...")
-        results = model(
-            img_512, verbose=True, conf=0.1
-        )  # Reduz confiança mínima para debug
-        print(f"✓ Detecção concluída")
-        print(f"Resultados obtidos: {len(results)}")
+        results = model(img_512, verbose=False)
 
-        # Mais informações sobre os resultados
-        if len(results) > 0:
-            result = results[0]
-            print("\nDetalhes do resultado:")
-            print(
-                f"  Boxes: {len(result.boxes) if hasattr(result, 'boxes') else 0}"
-            )
-            print(
-                f"  Masks: {len(result.masks) if hasattr(result, 'masks') else 0}"
-            )
-            if hasattr(result, "boxes") and len(result.boxes) > 0:
-                for i, box in enumerate(result.boxes):
-                    print(f"  Box {i}:")
-                    print(f"    Confidence: {float(box.conf):.3f}")
-                    print(f"    Class: {int(box.cls)}")
-
-        if len(results) == 0:
-            print("❌ Nenhum resultado retornado pelo modelo")
+        if not results or len(results) == 0:
             return None
 
-        # Verifica se há máscaras no resultado
+        # Pega a primeira detecção (assumindo que é a melhor)
         result = results[0]
-        if (
-            not hasattr(result, "masks")
-            or result.masks is None
-            or len(result.masks) == 0
-        ):
-            print("❌ Nenhuma máscara encontrada no resultado")
+        if result.masks is None or len(result.masks.data) == 0:
             return None
 
-        print(f"✓ Máscara encontrada")
-        print(f"  Total de máscaras: {len(result.masks)}")
-        print(f"  Total de boxes: {len(result.boxes)}")
+        # # Extrai dados da máscara
+        # mask_data = result.masks[0]
+        # points = mask_data.xy[0]  # Pega apenas os pontos do primeiro polígono
+        # confidence = float(result.boxes[0].conf)
+        # class_id = int(result.boxes[0].cls)
 
-        # Extrai dados da máscara
-        mask_data = result.masks[0]
-        points = mask_data.xy[0]  # Pega apenas os pontos do primeiro polígono
-        confidence = float(result.boxes[0].conf)
-        class_id = int(result.boxes[0].cls)
+        # # Normaliza os pontos para o intervalo [0,1]
+        # normalized_points = points / 512  # Assumindo imagem 512x512
 
-        print(f"✓ Dados extraídos da máscara:")
-        print(f"  Pontos: {len(points)}")
-        print(f"  Confiança: {confidence:.3f}")
-        print(f"  Classe: {class_id}")
+        # Precisamos encontrar a segmentação com maior confiança
+        boxes_conf = result.boxes.conf.cpu().numpy()  # array de confianças
+        best_idx = int(np.argmax(boxes_conf))  # índice da maior confiança
 
-        # Normaliza os pontos para o intervalo [0,1]
-        normalized_points = points / 512  # Assumindo imagem 512x512
-        print(f"✓ Pontos normalizados para intervalo [0,1]")
-        print(
-            f"  Primeiro ponto: ({normalized_points[0][0]:.3f}, {normalized_points[0][1]:.3f})"
-        )
-        print(
-            f"  Último ponto: ({normalized_points[-1][0]:.3f}, {normalized_points[-1][1]:.3f})"
-        )
+        # Em YOLOv8, result.masks.xyn[best_idx] => shape (N,2) com coords normalizadas 0..1
+        best_polygon = result.masks.xyn[best_idx]
+
+        # Classe detectada (se seu modelo tiver só 1 classe, deve ser 0)
+        if result.boxes.cls is not None:
+            best_cls = int(result.boxes.cls[best_idx].item())
+        else:
+            best_cls = 0
+
+        # Confiança
+        best_conf = float(boxes_conf[best_idx])
 
         return {
-            "polygon": normalized_points,
-            "confidence": confidence,
-            "class_id": class_id,
+            "polygon": best_polygon,  # (N,2)
+            "class_id": best_cls,
+            "confidence": best_conf,
         }
 
     except Exception as e:
-        print(f"❌ Erro na segmentação: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        print(f"Erro na segmentação: {str(e)}")
         return None
 
 
@@ -187,64 +119,41 @@ def detect_lots_and_save(
 
     try:
         # Carrega o modelo YOLO
-        print("\n=== Iniciando detecção de lotes ===")
-        print(f"Modelo: {model_path}")
-        print(f"Total de itens: {len(items_list)}")
-        print(f"Ajuste de máscara: {adjust_mask}")
-
-        print("\nCarregando modelo YOLO...")
+        print("Carregando modelo YOLO...")
         model = load_yolo_model(model_path)
-        print("✓ Modelo carregado com sucesso")
 
         for item in items_list:
             try:
                 item_id = item["object_id"]
-                print(f"\nProcessando item: {item_id}")
-                print(f"Latitude: {item.get('latitude')}")
-                print(f"Longitude: {item.get('longitude')}")
-
                 image_content = item.get("image_content")
+
                 if not image_content:
-                    print(
-                        f"❌ Conteúdo da imagem não encontrado para {item_id}"
-                    )
+                    print(f"Conteúdo da imagem não encontrado para {item_id}")
                     continue
 
-                print("Decodificando imagem...")
                 # Converte bytes para numpy array
                 nparr = np.frombuffer(image_content, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 if img is None:
-                    print(f"❌ Erro ao decodificar imagem para {item_id}")
+                    print(f"Erro ao decodificar imagem para {item_id}")
                     continue
 
-                print(f"✓ Imagem decodificada com sucesso: {img.shape}")
-
                 # Redimensiona para 512x512
-                print("Redimensionando imagem para 512x512...")
                 img_512 = cv2.resize(
                     img, (512, 512), interpolation=cv2.INTER_AREA
                 )
-                print("✓ Imagem redimensionada com sucesso")
 
                 # Realiza a detecção
-                print("\nExecutando detecção com YOLOv8...")
                 seg_data = get_best_segmentation(model, img_512)
 
                 if seg_data is None:
-                    print(f"❌ Nenhuma detecção encontrada para item {item_id}")
+                    print(f"Nenhuma detecção encontrada para item {item_id}")
                     continue
-
-                print(f"✓ Detecção realizada com sucesso")
-                print(f"  Confiança: {seg_data['confidence']:.3f}")
-                print(f"  Classe: {seg_data['class_id']}")
-                print(f"  Pontos do polígono: {len(seg_data['polygon'])}")
 
                 # Calcula área original em pixels (normalizada)
                 original_area_pixels = calculate_polygon_area(
                     seg_data["polygon"]
                 )
-                print(f"  Área original em pixels: {original_area_pixels:.2f}")
 
                 # Prepara documento base
                 doc_to_save = {
@@ -271,7 +180,6 @@ def detect_lots_and_save(
 
                 # Se adjust_mask=True, processa ajuste
                 if adjust_mask:
-                    print("\nAplicando ajuste de máscara...")
                     adjusted_polygon, adjustment_method = (
                         select_best_polygon_adjustment(
                             seg_data,
@@ -281,7 +189,6 @@ def detect_lots_and_save(
                     )
 
                     if adjusted_polygon is not None:
-                        print(f"✓ Ajuste realizado: {adjustment_method}")
                         # Calcula área do polígono ajustado
                         adjusted_area_pixels = calculate_polygon_area(
                             adjusted_polygon
@@ -305,32 +212,24 @@ def detect_lots_and_save(
                                 area_difference_percent
                             ),
                         }
-                        print(
-                            f"  Área ajustada em pixels: {adjusted_area_pixels:.2f}"
-                        )
-                        print(
-                            f"  Diferença de área: {area_difference_percent:.1f}%"
-                        )
 
                 processed_docs.append(doc_to_save)
-                print(f"✓ Item {item_id} processado com sucesso")
+                print(f"Processado item {item_id}")
+                if adjust_mask and "adjusted_detection" in doc_to_save:
+                    print(
+                        f"  Método de ajuste: {doc_to_save['adjusted_detection']['adjustment_method']}"
+                    )
+                    print(
+                        f"  Diferença de área: {doc_to_save['adjusted_detection']['area_difference_percent']:.2f}%"
+                    )
 
             except Exception as e:
-                print(
-                    f"❌ Erro processando item {item.get('object_id', 'N/A')}: {str(e)}"
-                )
-                import traceback
-
-                traceback.print_exc()
+                print(f"Erro processando item: {str(e)}")
                 continue
 
-        print(f"\n=== Processamento finalizado ===")
-        print(f"Total de documentos processados: {len(processed_docs)}")
+        print(f"\nTotal de documentos processados: {len(processed_docs)}")
         return processed_docs
 
     except Exception as e:
-        print(f"❌ Erro durante o processamento: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        print(f"Erro durante o processamento: {str(e)}")
         return []
