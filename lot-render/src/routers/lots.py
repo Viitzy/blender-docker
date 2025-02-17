@@ -27,6 +27,7 @@ class DetectLotRequest(BaseModel):
 
 class DetectLotData(BaseModel):
     points: List[Point]
+    doc_id: Optional[str] = None
 
 
 class DetectLotResponse(BaseModel):
@@ -71,7 +72,7 @@ async def detect_lot(request: DetectLotRequest):
         return DetectLotResponse(
             status="success",
             message="Success",
-            data=DetectLotData(points=points),
+            data=DetectLotData(points=points, doc_id=result["doc_id"]),
             meta=result.get("meta"),
         )
     else:
