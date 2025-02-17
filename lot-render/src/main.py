@@ -63,11 +63,6 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 #         )
 
 
-# Include routers with prefix
-# app.include_router(
-#     lots.router, prefix="/api/v1", dependencies=[Depends(get_api_key)]
-# )
-
 app.include_router(lots.router, prefix="/lots")
 
 

@@ -439,100 +439,100 @@ async def process_lot_service(
                     },
                 )
 
-        # # Process elevations
-        # google_maps = GoogleMapsAPI()
-        # # Check if document already has elevations
-        # doc = await mongo_db.get_detection(doc_id)
-        # if not doc.get("lot_details", {}).get("elevations"):
-        #     elevations_processed = process_lots_elevation(
-        #         mongodb_uri=mongo_connection_string,
-        #         api_key=google_maps.api_key,
-        #         doc_id=doc_id,
-        #         confidence=confidence,
-        #     )
+        # Process elevations
+        google_maps = GoogleMapsAPI()
+        # Check if document already has elevations
+        doc = await mongo_db.get_detection(doc_id)
+        if not doc.get("lot_details", {}).get("elevations"):
+            elevations_processed = process_lots_elevation(
+                mongodb_uri=mongo_connection_string,
+                api_key=google_maps.api_key,
+                doc_id=doc_id,
+                confidence=confidence,
+            )
 
-        #     if elevations_processed:
-        #         doc = elevations_processed[0]  # Get updated document
-        # else:
-        #     print("Elevations already exist, skipping elevation processing")
+            if elevations_processed:
+                doc = elevations_processed[0]  # Get updated document
+        else:
+            print("Elevations already exist, skipping elevation processing")
 
-        # # Process UTM coordinates
-        # utm_processed = process_lots_utm_coordinates(
-        #     mongodb_uri=mongo_connection_string,
-        #     doc_id=doc_id,
-        #     confidence=confidence,
-        # )
+        # Process UTM coordinates
+        utm_processed = process_lots_utm_coordinates(
+            mongodb_uri=mongo_connection_string,
+            doc_id=doc_id,
+            confidence=confidence,
+        )
 
-        # if utm_processed:
-        #     doc = utm_processed[0]  # Get updated document
-        #     print("utm_processed")
+        if utm_processed:
+            doc = utm_processed[0]  # Get updated document
+            print("utm_processed")
 
-        # # Process cardinal points
-        # cardinal_processed = process_cardinal_points(
-        #     mongodb_uri=mongo_connection_string,
-        #     distance_meters=5,
-        #     doc_id=doc_id,
-        #     confidence=confidence,
-        # )
+        # Process cardinal points
+        cardinal_processed = process_cardinal_points(
+            mongodb_uri=mongo_connection_string,
+            distance_meters=5,
+            doc_id=doc_id,
+            confidence=confidence,
+        )
 
-        # if cardinal_processed:
-        #     doc = cardinal_processed[0]  # Get updated document
-        #     print("cardinal_points_processed")
+        if cardinal_processed:
+            doc = cardinal_processed[0]  # Get updated document
+            print("cardinal_points_processed")
 
-        #     # Process front points
-        #     front_processed = process_front_points(
-        #         mongodb_uri=mongo_connection_string,
-        #         google_maps_api_key=google_maps.api_key,
-        #         create_maps=False,
-        #         doc_id=doc_id,
-        #         confidence=confidence,
-        #     )
+            # Process front points
+            front_processed = process_front_points(
+                mongodb_uri=mongo_connection_string,
+                google_maps_api_key=google_maps.api_key,
+                create_maps=False,
+                doc_id=doc_id,
+                confidence=confidence,
+            )
 
-        #     if front_processed:
-        #         point_colors = front_processed[0].get("point_colors", {})
-        #         await mongo_db.update_detection(
-        #             doc_id, {"point_colors": point_colors}
-        #         )
+            if front_processed:
+                point_colors = front_processed[0].get("point_colors", {})
+                await mongo_db.update_detection(
+                    doc_id, {"point_colors": point_colors}
+                )
 
-        #         # Process CSV
-        #         csv_processed = process_lots_csv(
-        #             mongodb_uri=mongo_connection_string,
-        #             bucket_name="csv_from_have_allotment",
-        #             year=str(datetime.now().year),
-        #             doc_id=doc_id,
-        #             confidence=confidence,
-        #         )
+                # Process CSV
+                csv_processed = process_lots_csv(
+                    mongodb_uri=mongo_connection_string,
+                    bucket_name="csv_from_have_allotment",
+                    year=str(datetime.now().year),
+                    doc_id=doc_id,
+                    confidence=confidence,
+                )
 
-        #         if csv_processed and len(csv_processed) > 0:
-        #             # CSV URL is already updated in MongoDB by process_lots_csv
-        #             print("CSV processado e salvo com sucesso")
-        #             doc = csv_processed[0]  # Get updated document
+                if csv_processed and len(csv_processed) > 0:
+                    # CSV URL is already updated in MongoDB by process_lots_csv
+                    print("CSV processado e salvo com sucesso")
+                    doc = csv_processed[0]  # Get updated document
 
-        #         # Process GLB (only if CSV was processed)
-        #         if doc.get("csv_elevation_colors"):
-        #             glb_processed = process_lots_glb(
-        #                 mongodb_uri=mongo_connection_string,
-        #                 bucket_name="images_from_have_allotment",
-        #                 bucket_name_csv="csv_from_have_allotment",
-        #                 doc_id=doc_id,
-        #                 confidence=confidence,
-        #             )
+                # Process GLB (only if CSV was processed)
+                if doc.get("csv_elevation_colors"):
+                    glb_processed = process_lots_glb(
+                        mongodb_uri=mongo_connection_string,
+                        bucket_name="images_from_have_allotment",
+                        bucket_name_csv="csv_from_have_allotment",
+                        doc_id=doc_id,
+                        confidence=confidence,
+                    )
 
-        #             if glb_processed and len(glb_processed) > 0:
-        #                 print("GLB processado e salvo com sucesso")
-        #                 doc = glb_processed[0]  # Get updated document
+                    if glb_processed and len(glb_processed) > 0:
+                        print("GLB processado e salvo com sucesso")
+                        doc = glb_processed[0]  # Get updated document
 
-        #         # Process slope
-        #         slope_processed = process_lots_slope(
-        #             mongodb_uri=mongo_connection_string,
-        #             year=str(datetime.now().year),
-        #             doc_id=doc_id,
-        #             confidence=confidence,
-        #         )
+                # Process slope
+                slope_processed = process_lots_slope(
+                    mongodb_uri=mongo_connection_string,
+                    year=str(datetime.now().year),
+                    doc_id=doc_id,
+                    confidence=confidence,
+                )
 
-        #         if slope_processed:
-        #             doc = slope_processed[0]  # Get updated document
-        #             print("Slope processado e salvo com sucesso")
+                if slope_processed:
+                    doc = slope_processed[0]  # Get updated document
+                    print("Slope processado e salvo com sucesso")
 
         # Get final document
         final_doc = await mongo_db.get_detection(doc_id)
