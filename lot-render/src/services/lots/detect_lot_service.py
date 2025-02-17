@@ -13,6 +13,18 @@ from ...modules.area import calculate_geo_area
 from google.cloud import storage
 
 
+def points_to_yolov8_annotation(points: List[List[float]]) -> str:
+    """Convert normalized points to YOLOv8 annotation string."""
+    # Start with class 0 (assuming single class)
+    annotation = ["0"]
+
+    # Add coordinates
+    for x, y in points:
+        annotation.extend([f"{x:.8f}", f"{y:.8f}"])
+
+    return " ".join(annotation)
+
+
 async def detect_lot_service(
     latitude: float,
     longitude: float,
@@ -151,6 +163,9 @@ async def detect_lot_service(
                 "confidence": detection["confidence"],
                 "mask_points": detection["original_detection"]["polygon"],
                 "geo_points": original_points,
+                "yolov8_annotation": points_to_yolov8_annotation(
+                    detection["original_detection"]["polygon"]
+                ),
                 "processed_at": datetime.utcnow(),
             }
         }
@@ -178,6 +193,9 @@ async def detect_lot_service(
                 "adjustment_type": detection["adjusted_detection"][
                     "adjustment_method"
                 ],
+                "yolov8_annotation": points_to_yolov8_annotation(
+                    detection["adjusted_detection"]["polygon"]
+                ),
                 "adjusted_at": datetime.utcnow(),
             }
 
