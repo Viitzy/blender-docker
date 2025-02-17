@@ -1,6 +1,6 @@
 from fastapi import FastAPI, status, Request, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
-from src.routers import lots
+from .routers import lots
 from fastapi.responses import JSONResponse
 from fastapi.security.api_key import APIKeyHeader
 from starlette.status import HTTP_403_FORBIDDEN

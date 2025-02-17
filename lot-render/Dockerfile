@@ -75,8 +75,8 @@ RUN ${BLENDER_PATH}/2.83/python/bin/pip3 install --no-cache-dir \
     Pillow==8.4.0
 
 # Create models directory and download YOLO model
-# RUN mkdir -p /app/models && \
-#     curl -L "https://storage.cloud.google.com/gethome-files/computational-vision/models/zoom_20/yolo-best-models/zoom_20/best.pt?authuser=2" -o /app/models/best.pt
+RUN mkdir -p /app/models && \
+    curl -L "https://storage.cloud.google.com/gethome-files/computational-vision/models/zoom_20/yolo-best-models/zoom_20/best.pt?authuser=2" -o /app/models/best.pt
 
 # Copy application code
 COPY . .
