@@ -416,15 +416,9 @@ async def process_lot_service(
             )
 
         # Process site images
-        watermark_path = (
-            Path(__file__).parent.parent.parent.parent
-            / "assets"
-            / "watermark.png"
-        )
         site_images_processed = process_lot_images_for_site(
             mongodb_uri=mongo_connection_string,
             hex_color="#e8f34e",
-            watermark_path=str(watermark_path),
             doc_id=doc_id,
             confidence=confidence,
         )

@@ -83,7 +83,6 @@ def yolov8_annotation_to_contours(annotation: str, image_shape: tuple) -> list:
 def process_lot_images_for_site(
     mongodb_uri: str,
     hex_color: str,
-    watermark_path: str,
     doc_id: str = None,
     confidence: float = 0.62,
 ) -> list:
