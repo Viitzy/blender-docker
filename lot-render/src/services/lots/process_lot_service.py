@@ -489,11 +489,6 @@ async def process_lot_service(
             )
 
             if front_processed:
-                point_colors = front_processed[0].get("point_colors", {})
-                await mongo_db.update_detection(
-                    doc_id, {"point_colors": point_colors}
-                )
-
                 # Process CSV
                 csv_processed = process_lots_csv(
                     mongodb_uri=mongo_connection_string,
