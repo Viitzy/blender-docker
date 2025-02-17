@@ -9,7 +9,6 @@ from datetime import datetime
 import json
 from typing import Optional, Dict, Any, List
 
-from ..services.lots.analyze_lot_service import analyze_lot_service
 from ..services.lots.detect_lot_service import detect_lot_service
 from ..services.lots.process_lot_service import process_lot_service
 
