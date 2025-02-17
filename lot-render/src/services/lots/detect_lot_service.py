@@ -115,6 +115,7 @@ async def detect_lot_service(
                 "status": "error",
                 "points": [],
                 "error": "No lots detected in the image",
+                "doc_id": None,
             }
 
         # Update detection results
@@ -232,14 +233,12 @@ async def detect_lot_service(
         # Update MongoDB with lot_details
         await mongo_db.update_detection(doc_id, {"lot_details": lot_details})
 
-        return {
-            "status": "success",
-            "points": points,
-        }
+        return {"status": "success", "points": points, "doc_id": str(doc_id)}
 
     except Exception as e:
         return {
             "status": "error",
             "points": [],
             "error": str(e),
+            "doc_id": None,
         }

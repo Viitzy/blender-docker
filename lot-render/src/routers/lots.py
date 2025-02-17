@@ -102,8 +102,6 @@ async def process_lot(request: ProcessLotRequest):
     result = await process_lot_service(
         doc_id=request.doc_id,
         points=request.points,
-        zoom=20,  # Fixed value
-        confidence=0.62,  # Fixed value
     )
 
     if result["status"] == "success":
